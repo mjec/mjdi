@@ -146,6 +146,9 @@ fn division_fuzz(value: u16) {
 
 impl Arbitrary for Division {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        // We g.choose::<bool>() here because we want to construct either a Division formatted either with ticks per quarter note or subdivisions of a second.
+        // It is tempting to simply generate a u16 and let the top bit decide; but we're explicitly trying not to rely on the representation; instead we are
+        // constructing an arbitrary Division enum instance, covering the available range of values.
         if *g.choose(&[true, false]).expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
             {
               let mut ticks: Option<NonZeroU16> = None;
