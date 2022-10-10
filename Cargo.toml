@@ -1,7 +1,11 @@
 [package]
 name = "mjdi"
+description = "A MIDI file manipulator, or something"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/mjec/mjdi/"
+publish = false
 
 [dependencies]
 
