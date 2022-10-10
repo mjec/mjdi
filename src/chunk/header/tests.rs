@@ -193,6 +193,7 @@ fn chunk_roundtrips(format: Format, ntrks: NonZeroU16, division: Division) {
 #[quickcheck]
 /// This test always passes, as long as it doesn't panic.
 fn chunk_fuzz(value: FourteenBytes) -> TestResult {
+    #[allow(clippy::match_single_binding)]
     match Chunk::try_from(&value.data[0..14]) {
         _ => TestResult::passed(),
     }
