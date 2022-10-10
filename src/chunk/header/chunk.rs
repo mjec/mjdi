@@ -73,7 +73,8 @@ impl TryFrom<&[u8]> for Chunk {
         } else {
             Ok(Chunk {
                 format: Format::try_from(u16::from_be_bytes([value[8], value[9]]))?,
-                ntrks: NonZeroU16::new(u16::from_be_bytes([value[10], value[11]])).ok_or(ChunkError::InvalidNumberOfTracks)?,
+                ntrks: NonZeroU16::new(u16::from_be_bytes([value[10], value[11]]))
+                    .ok_or(ChunkError::InvalidNumberOfTracks)?,
                 division: Division::try_from(u16::from_be_bytes([value[12], value[13]]))?,
             })
         }

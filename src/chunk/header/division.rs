@@ -47,8 +47,9 @@ impl TryFrom<u16> for Division {
 
         if (bytes & inverse_mask) == 0 {
             return Ok(Self::TicksPerQuarterNote(
-                NonZeroU16::new(bytes & Self::TICKS_PER_QUARTER_NOTE_MASK)
-                  .ok_or::<DivisionError>(DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero)?,
+                NonZeroU16::new(bytes & Self::TICKS_PER_QUARTER_NOTE_MASK).ok_or::<DivisionError>(
+                    DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero,
+                )?,
             ));
         }
 
@@ -61,7 +62,8 @@ impl TryFrom<u16> for Division {
 
         Ok(Self::SubdivisionsOfASecond {
             timecode_format,
-            ticks_per_frame: NonZeroU8::new(bytes.to_be_bytes()[1]).ok_or(DivisionError::TicksPerFrameMustBeGreaterThanZero)?,
+            ticks_per_frame: NonZeroU8::new(bytes.to_be_bytes()[1])
+                .ok_or(DivisionError::TicksPerFrameMustBeGreaterThanZero)?,
         })
     }
 }
