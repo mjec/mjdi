@@ -1,11 +1,13 @@
+use std::num::{NonZeroU16, NonZeroU8};
+
 use super::*;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Division {
-    TicksPerQuarterNote(u16),
+    TicksPerQuarterNote(NonZeroU16),
     SubdivisionsOfASecond {
         timecode_format: SMPTETimecodeFormat,
-        ticks_per_frame: u8,
+        ticks_per_frame: NonZeroU8,
     },
 }
 
@@ -41,14 +43,12 @@ impl TryFrom<u16> for Division {
     type Error = DivisionError;
 
     fn try_from(bytes: u16) -> Result<Self, Self::Error> {
-        if bytes == 0 {
-            return Err(DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero);
-        }
         let inverse_mask = !Self::TICKS_PER_QUARTER_NOTE_MASK;
 
         if (bytes & inverse_mask) == 0 {
             return Ok(Self::TicksPerQuarterNote(
-                bytes & Self::TICKS_PER_QUARTER_NOTE_MASK,
+                NonZeroU16::new(bytes & Self::TICKS_PER_QUARTER_NOTE_MASK)
+                  .ok_or::<DivisionError>(DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero)?,
             ));
         }
 
@@ -59,13 +59,9 @@ impl TryFrom<u16> for Division {
 
         let timecode_format = SMPTETimecodeFormat::try_from(bytes.to_be_bytes()[0] as i8)?;
 
-        if bytes.to_be_bytes()[1] == 0 {
-            return Err(DivisionError::TicksPerFrameMustBeGreaterThanZero);
-        }
-
         Ok(Self::SubdivisionsOfASecond {
             timecode_format,
-            ticks_per_frame: bytes.to_be_bytes()[1],
+            ticks_per_frame: NonZeroU8::new(bytes.to_be_bytes()[1]).ok_or(DivisionError::TicksPerFrameMustBeGreaterThanZero)?,
         })
     }
 }
@@ -75,7 +71,7 @@ impl Division {
     pub(crate) fn high_byte(&self) -> u8 {
         match self {
             Division::TicksPerQuarterNote(n) => {
-                (n & Self::TICKS_PER_QUARTER_NOTE_MASK).to_be_bytes()[0]
+                (n.get() & Self::TICKS_PER_QUARTER_NOTE_MASK).to_be_bytes()[0]
             }
             Division::SubdivisionsOfASecond {
                 timecode_format: negative,
@@ -87,11 +83,11 @@ impl Division {
     pub(crate) fn low_byte(&self) -> u8 {
         match self {
             Division::TicksPerQuarterNote(n) => {
-                (n & Self::TICKS_PER_QUARTER_NOTE_MASK).to_be_bytes()[1]
+                (n.get() & Self::TICKS_PER_QUARTER_NOTE_MASK).to_be_bytes()[1]
             }
             Division::SubdivisionsOfASecond {
                 ticks_per_frame, ..
-            } => *ticks_per_frame,
+            } => ticks_per_frame.get(),
         }
     }
 }

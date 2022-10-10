@@ -1,14 +1,16 @@
+use std::num::NonZeroU16;
+
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk {
     format: Format,
-    ntrks: NTracks,
+    ntrks: NonZeroU16,
     division: Division,
 }
 
 impl Chunk {
-    pub fn new(format: Format, ntrks: NTracks, division: Division) -> Self {
+    pub fn new(format: Format, ntrks: NonZeroU16, division: Division) -> Self {
         Self {
             format,
             ntrks,
@@ -33,8 +35,8 @@ impl IntoIterator for Chunk {
             6, // Length (u32 big endian) = 6
             (self.format as u16).to_be_bytes()[0],
             (self.format as u16).to_be_bytes()[1],
-            self.ntrks.to_be_bytes()[0],
-            self.ntrks.to_be_bytes()[1],
+            self.ntrks.get().to_be_bytes()[0],
+            self.ntrks.get().to_be_bytes()[1],
             self.division.high_byte(),
             self.division.low_byte(),
         ];
@@ -48,7 +50,7 @@ pub enum ChunkError {
     InvalidType,
     InvalidLength,
     InvalidFormat(FormatError),
-    InvalidNumberOfTracks(NTracksError),
+    InvalidNumberOfTracks,
     InvalidDivision(DivisionError),
 }
 
@@ -71,7 +73,7 @@ impl TryFrom<&[u8]> for Chunk {
         } else {
             Ok(Chunk {
                 format: Format::try_from(u16::from_be_bytes([value[8], value[9]]))?,
-                ntrks: NTracks::try_from(u16::from_be_bytes([value[10], value[11]]))?,
+                ntrks: NonZeroU16::new(u16::from_be_bytes([value[10], value[11]])).ok_or(ChunkError::InvalidNumberOfTracks)?,
                 division: Division::try_from(u16::from_be_bytes([value[12], value[13]]))?,
             })
         }
