@@ -20,6 +20,18 @@ impl Chunk {
     }
 }
 
+impl From<Chunk> for Vec<u8> {
+    fn from(chunk: Chunk) -> Self {
+        let mut result: Vec<u8> = Vec::new();
+        result.extend(Vec::from(crate::chunk::ChunkType::Header));
+        result.extend(6u32.to_be_bytes()); // length
+        result.extend(Vec::from(chunk.format));
+        result.extend(chunk.ntrks.get().to_be_bytes());
+        result.extend(Vec::from(chunk.division));
+        result
+    }
+}
+
 impl IntoIterator for Chunk {
     type Item = u8;
     type IntoIter = std::vec::IntoIter<Self::Item>;

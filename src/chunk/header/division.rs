@@ -11,6 +11,18 @@ pub enum Division {
     },
 }
 
+impl From<Division> for Vec<u8> {
+    fn from(div: Division) -> Self {
+        match div {
+            Division::TicksPerQuarterNote(n) => Vec::from(n.get().to_be_bytes()),
+            Division::SubdivisionsOfASecond {
+                timecode_format,
+                ticks_per_frame,
+            } => vec![timecode_format as u8, ticks_per_frame.get()],
+        }
+    }
+}
+
 backed_enum!(
   pub enum SMPTETimecodeFormat(i8, SMPTETimecodeFormatError) {
     TwentyFour = -24,
