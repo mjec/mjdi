@@ -29,7 +29,7 @@ fn division_ticks_per_quarter_note(value: u16) -> TestResult {
             Division::try_from(value)
                 == Err(DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero),
         )
-    } else if value < !Division::TICKS_PER_QUARTER_NOTE_MASK && value > 0 {
+    } else if value < Division::MARKER_BIT_MASK && value > 0 {
         TestResult::from_bool(
             Division::try_from(value)
                 == Ok(Division::TicksPerQuarterNote(
@@ -37,7 +37,7 @@ fn division_ticks_per_quarter_note(value: u16) -> TestResult {
                         .expect("We already handle the value == 0 case in an earlier branch"),
                 )),
         )
-    } else if value < !Division::TICKS_PER_QUARTER_NOTE_MASK {
+    } else if value < Division::MARKER_BIT_MASK {
         TestResult::from_bool(
             Division::try_from(value) == Err(DivisionError::TicksPerFrameMustBeGreaterThanZero),
         )
@@ -73,7 +73,7 @@ fn division_ticks_per_frame_narrow(
 #[quickcheck]
 // Called broad because it checks a wider range of invalid values than the narrow version
 fn division_ticks_per_frame_broad(value: u16) -> TestResult {
-    if value <= Division::TICKS_PER_QUARTER_NOTE_MASK {
+    if value & Division::MARKER_BIT_MASK == 0 {
         TestResult::discard()
     } else if SMPTETimecodeFormat::try_from(value.to_be_bytes()[0] as i8).is_err() {
         TestResult::from_bool(
@@ -111,7 +111,7 @@ fn division_fuzz(value: u16) -> TestResult {
             Division::try_from(value)
                 == Err(DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero),
         )
-    } else if value < !Division::TICKS_PER_QUARTER_NOTE_MASK {
+    } else if value < Division::MARKER_BIT_MASK {
         TestResult::from_bool(
             Division::try_from(value)
                 == Ok(Division::TicksPerQuarterNote(
@@ -149,7 +149,7 @@ impl Arbitrary for Division {
             {
               let mut ticks = 0;
               while ticks == 0 {
-                ticks = u16::arbitrary(g) & Division::TICKS_PER_QUARTER_NOTE_MASK;
+                ticks = u16::arbitrary(g) & !Division::MARKER_BIT_MASK;
               }
                 Division::TicksPerQuarterNote(NonZeroU16::new(ticks).expect("We already handle the ticks == 0 case in an earlier branch"))
             } else {

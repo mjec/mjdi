@@ -43,50 +43,47 @@ impl TryFrom<u16> for Division {
     type Error = DivisionError;
 
     fn try_from(bytes: u16) -> Result<Self, Self::Error> {
-        let inverse_mask = !Self::TICKS_PER_QUARTER_NOTE_MASK;
-
-        if (bytes & inverse_mask) == 0 {
+        if (bytes & Self::MARKER_BIT_MASK) == 0 {
             return Ok(Self::TicksPerQuarterNote(
-                NonZeroU16::new(bytes & Self::TICKS_PER_QUARTER_NOTE_MASK).ok_or::<DivisionError>(
+                NonZeroU16::new(bytes & !Self::MARKER_BIT_MASK).ok_or::<DivisionError>(
                     DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero,
                 )?,
             ));
+        } else {
+            Ok(Self::SubdivisionsOfASecond {
+                timecode_format: SMPTETimecodeFormat::try_from(bytes.to_be_bytes()[0] as i8)?,
+                ticks_per_frame: NonZeroU8::new(bytes.to_be_bytes()[1])
+                    .ok_or(DivisionError::TicksPerFrameMustBeGreaterThanZero)?,
+            })
         }
-
-        assert!(
-          bytes & inverse_mask == inverse_mask,
-          "Bitwise operations should make this invariant; either the top bit is set (i.e. bytes & inverse_mask == inverse_mask) or it's not (bytes & inverse_mask == 0). But if TICKS_PER_QUARTER_NOTE_MASK isn't just looking at the top bit, this might be wrong!"
-        );
-
-        let timecode_format = SMPTETimecodeFormat::try_from(bytes.to_be_bytes()[0] as i8)?;
-
-        Ok(Self::SubdivisionsOfASecond {
-            timecode_format,
-            ticks_per_frame: NonZeroU8::new(bytes.to_be_bytes()[1])
-                .ok_or(DivisionError::TicksPerFrameMustBeGreaterThanZero)?,
-        })
     }
 }
 
 impl Division {
-    pub(crate) const TICKS_PER_QUARTER_NOTE_MASK: u16 = 0b0111_1111_1111_1111u16;
+    /// The on bit marks the format of this division:
+    ///  0 => ticks per quarter note
+    ///  1 => subdivisions of a second
+    pub(super) const MARKER_BIT_MASK: u16 = 0b1000_0000_0000_0000;
+
     pub(crate) fn high_byte(&self) -> u8 {
         match self {
-            Division::TicksPerQuarterNote(n) => {
-                (n.get() & Self::TICKS_PER_QUARTER_NOTE_MASK).to_be_bytes()[0]
-            }
+            Division::TicksPerQuarterNote(n) => (!Self::MARKER_BIT_MASK & n.get()).to_be_bytes()[0],
             Division::SubdivisionsOfASecond {
-                timecode_format: negative,
-                ..
-            } => *negative as u8,
+                timecode_format, ..
+            } => *timecode_format as u8, // This always has Self::MARKER_BIT_MASK set because timecode_format is a negative i8.
+                                         // Still, this is a slight code smell; here we rely on Self::MARKER_BIT_MASK being a u16
+                                         // with only its top bit 1, AND timecode_format being a negative i8. Any change to the
+                                         // representation or range of SMPTETimecodeFormat, or any change to Self::MARKER_BIT_MASK,
+                                         // will invalidate this code. I would prefer some explicit signal of that, so changes to
+                                         // those would require changes here.
+                                         // Longer term, I think these methods will go away, to be replaced by `impl From<T> for &[u8]`
+                                         // for all these types, including T = Division.
         }
     }
 
     pub(crate) fn low_byte(&self) -> u8 {
         match self {
-            Division::TicksPerQuarterNote(n) => {
-                (n.get() & Self::TICKS_PER_QUARTER_NOTE_MASK).to_be_bytes()[1]
-            }
+            Division::TicksPerQuarterNote(n) => (!Self::MARKER_BIT_MASK & n.get()).to_be_bytes()[1],
             Division::SubdivisionsOfASecond {
                 ticks_per_frame, ..
             } => ticks_per_frame.get(),
