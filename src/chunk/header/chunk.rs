@@ -10,6 +10,7 @@ pub struct Chunk {
 }
 
 impl Chunk {
+    #[allow(dead_code)]
     pub fn new(format: Format, ntrks: NonZeroU16, division: Division) -> Self {
         Self {
             format,
@@ -46,17 +47,17 @@ impl IntoIterator for Chunk {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ChunkError {
-    InvalidSize,
-    InvalidType,
-    InvalidLength,
-    InvalidFormat(FormatError),
-    InvalidNumberOfTracks,
-    InvalidDivision(DivisionError),
+    SliceSize,
+    ChunkType,
+    ChunkLength,
+    Format(FormatError),
+    NumberOfTracks,
+    Division(DivisionError),
 }
 
 impl From<FormatError> for ChunkError {
     fn from(e: FormatError) -> Self {
-        ChunkError::InvalidFormat(e)
+        ChunkError::Format(e)
     }
 }
 
@@ -65,16 +66,16 @@ impl TryFrom<&[u8]> for Chunk {
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         if value.len() != 14 {
-            Err(ChunkError::InvalidSize)
+            Err(ChunkError::SliceSize)
         } else if value[0..4] != [b'M', b'T', b'h', b'd'] {
-            Err(ChunkError::InvalidType)
+            Err(ChunkError::ChunkType)
         } else if value[4..8] != [0, 0, 0, 6] {
-            Err(ChunkError::InvalidLength)
+            Err(ChunkError::ChunkLength)
         } else {
             Ok(Chunk {
                 format: Format::try_from(u16::from_be_bytes([value[8], value[9]]))?,
                 ntrks: NonZeroU16::new(u16::from_be_bytes([value[10], value[11]]))
-                    .ok_or(ChunkError::InvalidNumberOfTracks)?,
+                    .ok_or(ChunkError::NumberOfTracks)?,
                 division: Division::try_from(u16::from_be_bytes([value[12], value[13]]))?,
             })
         }

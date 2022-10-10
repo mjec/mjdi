@@ -3,9 +3,10 @@
 /// that the TryFrom implementation is exhaustive and matches the Enum.
 /// This also generates a quickcheck::Arbitrary implementation for the enum under cfg(test).
 macro_rules! backed_enum {
-  ($vis:vis enum $enum_name:ident($repr:ty, $error_type_name:ident) {
+  ($(#[$meta:meta])* $vis:vis enum $enum_name:ident($repr:ty, $error_type_name:ident) {
     $($name:ident $(= $val:expr)?,)+
   }) => {
+    $(#[$meta])*
     #[derive(Debug, PartialEq, Eq, Clone)]
     #[repr($repr)]
     $vis enum $enum_name {

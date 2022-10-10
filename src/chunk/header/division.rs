@@ -13,10 +13,10 @@ pub enum Division {
 
 backed_enum!(
   pub enum SMPTETimecodeFormat(i8, SMPTETimecodeFormatError) {
-    NegTwentyFour = -24,
-    NegTwentyFive = -25,
-    NegTwentyNine = -29,
-    NegThirty = -30,
+    TwentyFour = -24,
+    TwentyFive = -25,
+    TwentyNine = -29,
+    Thirty = -30,
 }
 );
 
@@ -29,7 +29,7 @@ pub enum DivisionError {
 
 impl From<DivisionError> for ChunkError {
     fn from(e: DivisionError) -> Self {
-        Self::InvalidDivision(e)
+        Self::Division(e)
     }
 }
 
@@ -44,11 +44,11 @@ impl TryFrom<u16> for Division {
 
     fn try_from(bytes: u16) -> Result<Self, Self::Error> {
         if (bytes & Self::MARKER_BIT_MASK) == 0 {
-            return Ok(Self::TicksPerQuarterNote(
+            Ok(Self::TicksPerQuarterNote(
                 NonZeroU16::new(bytes & !Self::MARKER_BIT_MASK).ok_or::<DivisionError>(
                     DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero,
                 )?,
-            ));
+            ))
         } else {
             Ok(Self::SubdivisionsOfASecond {
                 timecode_format: SMPTETimecodeFormat::try_from(bytes.to_be_bytes()[0] as i8)?,

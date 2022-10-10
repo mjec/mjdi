@@ -16,7 +16,7 @@ fn division_values_from_spec() {
     assert_eq!(
         Division::try_from(0xE250u16).expect("It's in the spec!"),
         Division::SubdivisionsOfASecond {
-            timecode_format: SMPTETimecodeFormat::NegThirty,
+            timecode_format: SMPTETimecodeFormat::Thirty,
             ticks_per_frame: NonZeroU8::new(80).expect("Value is non-zero"),
         }
     );
