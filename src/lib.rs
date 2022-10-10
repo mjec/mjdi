@@ -1,5 +1,3 @@
-#![feature(is_some_with)]
-
 #[macro_use]
 mod macros;
 
