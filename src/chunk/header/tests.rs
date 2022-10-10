@@ -191,6 +191,15 @@ fn chunk_roundtrips(format: Format, ntrks: NonZeroU16, division: Division) {
 }
 
 #[quickcheck]
+fn chunk_reprs_match(format: Format, ntrks: NonZeroU16, division: Division) {
+    let chunk = Chunk::new(format, ntrks, division);
+    assert_eq!(
+        chunk.clone().into_iter().collect::<Vec<u8>>(),
+        Vec::from(chunk)
+    );
+}
+
+#[quickcheck]
 /// This test always passes, as long as it doesn't panic.
 fn chunk_fuzz(value: FourteenBytes) -> TestResult {
     #[allow(clippy::match_single_binding)]
