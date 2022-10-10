@@ -48,25 +48,24 @@ fn division_ticks_per_quarter_note(value: u16) -> TestResult {
 
 #[quickcheck]
 /// Called narrow because it checks a narrower range of invalid values than the broad version
-fn division_ticks_per_frame_narrow(
-    timecode_format: SMPTETimecodeFormat,
-    ticks_per_frame: u8,
-) -> TestResult {
+fn division_ticks_per_frame_narrow(timecode_format: SMPTETimecodeFormat, ticks_per_frame: u8) {
     let value: u16 = u16::from_be_bytes([timecode_format as u8, ticks_per_frame]);
     if ticks_per_frame == 0 {
-        TestResult::from_bool(
-            Division::try_from(value) == Err(DivisionError::TicksPerFrameMustBeGreaterThanZero),
-        )
+        assert_eq!(
+            Division::try_from(value),
+            Err(DivisionError::TicksPerFrameMustBeGreaterThanZero)
+        );
     } else {
-        TestResult::from_bool(
-            Division::try_from(value)
-                == Ok(Division::SubdivisionsOfASecond {
-                    timecode_format,
-                    ticks_per_frame: NonZeroU8::new(ticks_per_frame).expect(
+        assert_eq!(
+            Division::try_from(value),
+            Ok(Division::SubdivisionsOfASecond {
+                timecode_format,
+                ticks_per_frame:
+                    NonZeroU8::new(ticks_per_frame).expect(
                         "We already handle the ticks_per_frame == 0 case in an earlier branch",
                     ),
-                }),
-        )
+            })
+        );
     }
 }
 
@@ -105,41 +104,43 @@ fn division_ticks_per_frame_broad(value: u16) -> TestResult {
 /// for it to be a super useful test in the `cargo t` case (where tests should be fast). It
 /// still runs there (and has caught bugs for me there), but it's really most useful when run
 /// for an extended period as a fuzzer.
-fn division_fuzz(value: u16) -> TestResult {
+fn division_fuzz(value: u16) {
     if value == 0 {
-        TestResult::from_bool(
-            Division::try_from(value)
-                == Err(DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero),
-        )
+        assert_eq!(
+            Division::try_from(value),
+            Err(DivisionError::TicksPerQuarterNoteMustBeGreaterThanZero)
+        );
     } else if value < Division::MARKER_BIT_MASK {
-        TestResult::from_bool(
-            Division::try_from(value)
-                == Ok(Division::TicksPerQuarterNote(
-                    NonZeroU16::new(value)
-                        .expect("We already handle the value == 0 case in an earlier branch"),
-                )),
-        )
+        assert_eq!(
+            Division::try_from(value),
+            Ok(Division::TicksPerQuarterNote(
+                NonZeroU16::new(value)
+                    .expect("We already handle the value == 0 case in an earlier branch"),
+            ))
+        );
     } else if SMPTETimecodeFormat::try_from(value.to_be_bytes()[0] as i8).is_err() {
-        TestResult::from_bool(
-            Division::try_from(value)
-                == Err(DivisionError::SMPTETimecodeFormatError(
-                    SMPTETimecodeFormatError::InvalidValue,
-                )),
-        )
+        assert_eq!(
+            Division::try_from(value),
+            Err(DivisionError::SMPTETimecodeFormatError(
+                SMPTETimecodeFormatError::InvalidValue,
+            ))
+        );
     } else if value.to_be_bytes()[1] == 0 {
-        TestResult::from_bool(
-            Division::try_from(value) == Err(DivisionError::TicksPerFrameMustBeGreaterThanZero),
-        )
+        assert_eq!(
+            Division::try_from(value),
+            Err(DivisionError::TicksPerFrameMustBeGreaterThanZero)
+        );
     } else {
-        TestResult::from_bool(
-            Division::try_from(value) == Ok(Division::SubdivisionsOfASecond {
+        assert_eq!(
+            Division::try_from(value),
+            Ok(Division::SubdivisionsOfASecond {
                 timecode_format: SMPTETimecodeFormat::try_from(value.to_be_bytes()[0] as i8)
                     .expect("Guaranteed to be Ok() because we checked if it is_err() above"),
                 ticks_per_frame: NonZeroU8::new(value.to_be_bytes()[1]).expect(
                     "We already handle the value.to_be_bytes()[1] == 0 case in an earlier branch",
                 ),
-            }),
-        )
+            })
+        );
     }
 }
 
@@ -147,19 +148,15 @@ impl Arbitrary for Division {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
         if *g.choose(&[true, false]).expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
             {
-              let mut ticks = 0;
-              while ticks == 0 {
-                ticks = u16::arbitrary(g) & !Division::MARKER_BIT_MASK;
+              let mut ticks: Option<NonZeroU16> = None;
+              while ticks.is_none() {
+                ticks = NonZeroU16::new(NonZeroU16::arbitrary(g).get() & !Division::MARKER_BIT_MASK);
               }
-                Division::TicksPerQuarterNote(NonZeroU16::new(ticks).expect("We already handle the ticks == 0 case in an earlier branch"))
+                Division::TicksPerQuarterNote(ticks.expect("We are guaranteed this is_some() by the preceding while loop condition"))
             } else {
-                let mut ticks_per_frame = 0u8;
-                while ticks_per_frame == 0 {
-                    ticks_per_frame = u8::arbitrary(g);
-                }
                 Division::SubdivisionsOfASecond {
                     timecode_format: SMPTETimecodeFormat::arbitrary(g),
-                    ticks_per_frame: NonZeroU8::new(ticks_per_frame).expect("We already handle the ticks_per_frame == 0 case in an earlier branch"),
+                    ticks_per_frame: NonZeroU8::arbitrary(g),
                 }
             }
     }
@@ -181,11 +178,12 @@ impl Arbitrary for FourteenBytes {
 }
 
 #[quickcheck]
-fn chunk_roundtrips(format: Format, ntrks: NonZeroU16, division: Division) -> TestResult {
+fn chunk_roundtrips(format: Format, ntrks: NonZeroU16, division: Division) {
     let chunk = Chunk::new(format, ntrks, division);
-    TestResult::from_bool(
-        Chunk::try_from(chunk.clone().into_iter().collect::<Vec<u8>>().as_slice()) == Ok(chunk),
-    )
+    assert_eq!(
+        Chunk::try_from(chunk.clone().into_iter().collect::<Vec<u8>>().as_slice()),
+        Ok(chunk),
+    );
 }
 
 #[quickcheck]
