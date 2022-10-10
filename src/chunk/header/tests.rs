@@ -172,9 +172,10 @@ struct FourteenBytes {
 
 impl Arbitrary for FourteenBytes {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        let alphabet = Vec::from_iter(0u8..=255u8);
         let mut result = FourteenBytes { data: [0u8; 14] };
         for i in 0..14 {
-            result.data[i] = *g.choose(Vec::from_iter(0u8..=255u8).as_slice()).expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
+            result.data[i] = *g.choose(&alphabet).expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
         }
         result
     }
