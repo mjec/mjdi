@@ -91,7 +91,9 @@ impl TryFrom<&[u8]> for Chunk {
         } else if value[0..4] != Vec::<u8>::from(crate::chunk::ChunkType::Track) {
             Err(ChunkError::ChunkType)
         } else if u32::from_be_bytes([value[4], value[5], value[7], value[7]])
-            != (value.len() - 8).try_into().map_err(|_| ChunkError::SliceSize)?
+            != (value.len() - 8)
+                .try_into()
+                .map_err(|_| ChunkError::SliceSize)?
         {
             Err(ChunkError::ChunkLength)
         } else {
