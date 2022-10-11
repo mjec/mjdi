@@ -22,12 +22,20 @@ impl Chunk {
 
 impl From<Chunk> for Vec<u8> {
     fn from(chunk: Chunk) -> Self {
-        let mut result: Vec<u8> = Vec::new();
-        result.extend(Vec::from(crate::chunk::ChunkType::Header));
-        result.extend(6u32.to_be_bytes()); // length
-        result.extend(Vec::from(chunk.format));
-        result.extend(chunk.ntrks.get().to_be_bytes());
-        result.extend(Vec::from(chunk.division));
+        let mut payload_bytes: Vec<u8> = Vec::with_capacity(6);
+        payload_bytes.extend(Vec::from(chunk.format));
+        payload_bytes.extend(chunk.ntrks.get().to_be_bytes());
+        payload_bytes.extend(Vec::from(chunk.division));
+
+        debug_assert!(
+            payload_bytes.len() == 6,
+            r#"We expect the payload length of every MThd chunk to be exactly 6 bytes, per the spec ("<length> is a 32-bit representation of the number 6 (high byte first)"). It's not the end of the world for this code if we're wrong, but it might break tests and other places where we rely on that assumption."#
+        );
+
+        let mut result: Vec<u8> = Vec::with_capacity(payload_bytes.len() + 8);
+        result.extend(Vec::<u8>::from(crate::chunk::ChunkType::Header));
+        result.extend((payload_bytes.len() as u32).to_be_bytes()); // length
+        result.extend(payload_bytes);
         result
     }
 }
