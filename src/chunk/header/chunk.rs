@@ -23,6 +23,7 @@ impl Chunk {
 impl From<Chunk> for Vec<u8> {
     fn from(chunk: Chunk) -> Self {
         let payload_bytes = concat_vecs!(
+            6;
             Vec::from(chunk.format),
             chunk.ntrks.get().to_be_bytes(),
             Vec::from(chunk.division)
@@ -34,6 +35,7 @@ impl From<Chunk> for Vec<u8> {
         );
 
         concat_vecs!(
+            14;
             Vec::<u8>::from(crate::chunk::ChunkType::Header),
             (payload_bytes.len() as u32).to_be_bytes(),
             payload_bytes

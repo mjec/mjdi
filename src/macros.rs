@@ -52,4 +52,12 @@ macro_rules! concat_vecs {
       result
     }
   };
+
+  ($cap:expr; $($vec:expr),+) => {
+    {
+      let mut result: Vec<u8> = Vec::with_capacity($cap);
+      $(result.extend($vec);)*
+      result
+    }
+  };
 }
