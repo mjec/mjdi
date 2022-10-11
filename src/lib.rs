@@ -2,6 +2,7 @@
 mod macros;
 
 mod chunk;
+mod test_data;
 mod vlq;
 
 #[cfg(test)]

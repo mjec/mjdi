@@ -207,3 +207,11 @@ fn chunk_fuzz(value: FourteenBytes) -> TestResult {
         _ => TestResult::passed(),
     }
 }
+
+#[test]
+fn chunk_from_brandenburg_concerto() {
+    assert_eq!(
+        Chunk::try_from(&crate::test_data::brandenburg::DATA[0..14]),
+        Ok(crate::test_data::brandenburg::expected_header())
+    );
+}
