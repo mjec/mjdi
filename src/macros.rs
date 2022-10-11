@@ -41,3 +41,15 @@ macro_rules! backed_enum {
     }
   }
 }
+
+/// Create a Vec<u8> by repeatedly extending with arguments.
+/// i.e. concat_vecs!(vec![0], vec![1]) == vec![0u8, 1u8]
+macro_rules! concat_vecs {
+  ($($vec:expr),+) => {
+    {
+      let mut result: Vec<u8> = Vec::new();
+      $(result.extend($vec);)*
+      result
+    }
+  };
+}
