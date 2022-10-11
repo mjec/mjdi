@@ -98,9 +98,21 @@ impl IntoIterator for Vlq {
 mod tests {
     use std::vec;
 
+    use quickcheck::Arbitrary;
     use quickcheck_macros::quickcheck;
 
     use super::*;
+
+    impl Arbitrary for Vlq {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let mut u32_value: u32 = u32::arbitrary(g);
+            while u32_value > crate::vlq::MAX_REPRESENTABLE {
+                u32_value = u32::arbitrary(g);
+            }
+
+            Vlq::try_from(u32_value).expect("We guarantee that u32_value <= MAX_REPRESENTABLE")
+        }
+    }
 
     /// These parameters are copied from the MIDI specification.
     #[test]
