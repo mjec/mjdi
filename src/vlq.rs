@@ -80,6 +80,14 @@ impl From<&Vlq> for u32 {
     }
 }
 
+impl From<&Vlq> for Vec<u8> {
+    fn from(vlq: &Vlq) -> Self {
+        let mut result = Vec::<u8>::from(&vlq.bytes[0..vlq.size]);
+        result.reverse(); // There must be a reason why this fuckery is necessary, but I've already forgotten it.
+        result
+    }
+}
+
 impl IntoIterator for Vlq {
     type Item = u8;
     type IntoIter = std::vec::IntoIter<Self::Item>;
