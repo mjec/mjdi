@@ -30,9 +30,7 @@ macro_rules! backed_enum {
     }
 
     #[cfg(test)]
-    use quickcheck::Arbitrary;
-    #[cfg(test)]
-    impl Arbitrary for $enum_name {
+    impl quickcheck::Arbitrary for $enum_name {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
           g.choose(&[
                 $($enum_name::$name,)*
