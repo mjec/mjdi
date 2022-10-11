@@ -74,7 +74,8 @@ pub enum Event {
 
 impl From<&Event> for Vec<u8> {
     fn from(event: &Event) -> Self {
-        #[allow(clippy::match_single_binding)] // we will need to come back to this and fill in the match arms
+        #[allow(clippy::match_single_binding)]
+        // we will need to come back to this and fill in the match arms
         match event {
             e => vec![*e as u8],
         }
