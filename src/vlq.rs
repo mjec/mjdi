@@ -10,6 +10,12 @@ pub struct Vlq {
     size: usize,
 }
 
+impl Vlq {
+    pub fn get(&self) -> u32 {
+        u32::from(self)
+    }
+}
+
 impl PartialOrd for Vlq {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         u32::from(self).partial_cmp(&u32::from(other))
