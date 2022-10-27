@@ -93,12 +93,7 @@ impl IntoIterator for Vlq {
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut result = Vec::<u8>::with_capacity(4);
-        for i in 0..self.size {
-            result.push(self.bytes[i]);
-        }
-        result.reverse();
-        result.into_iter()
+        Vec::<u8>::from(&self).into_iter()
     }
 }
 

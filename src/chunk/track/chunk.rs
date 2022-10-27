@@ -352,6 +352,8 @@ impl TryFrom<&[u8]> for Chunk {
     }
 }
 
+// Putting this in cfg(false)for now, while I work on getting Event working.
+// #[cfg(FALSE)]
 #[cfg(test)]
 mod tests {
     use quickcheck::Arbitrary;
@@ -361,7 +363,39 @@ mod tests {
 
     impl Arbitrary for Event {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let meta_message = MetaMessage::arbitrary(g);
+            let channel_message = ChannelMessage::arbitrary(g);
+            let sysex_message = SysexMessage::arbitrary(g);
+            g.choose(&[
+                Event::Meta(meta_message),
+                Event::Midi(channel_message),
+                Event::Sysex(sysex_message),
+            ])
+            .expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
+            .clone()
+        }
+    }
+
+    impl Arbitrary for MetaMessage {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
             todo!()
+        }
+    }
+
+    impl Arbitrary for ChannelMessage {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            todo!()
+        }
+    }
+
+    impl Arbitrary for SysexMessage {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let length = Vlq::arbitrary(g);
+
+            SysexMessage {
+                length,
+                bytes: Vec::<u8>::arbitrary(&mut quickcheck::Gen::new(usize::try_from(u32::from(length)).expect("usize should be large enough for a length, hopefully. If not, who knows what could happen."))),
+            }
         }
     }
 
@@ -374,8 +408,6 @@ mod tests {
         }
     }
 
-    // Putting this in cfg(false)for now, while I work on getting Event working.
-    #[cfg(FALSE)]
     #[quickcheck]
     fn make_bytes(events: Vec<MTrkEvent>) {
         let mut payload_bytes: Vec<u8> = Vec::with_capacity((events.len() * 5) + 8);
