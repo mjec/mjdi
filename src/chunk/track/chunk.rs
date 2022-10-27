@@ -109,8 +109,12 @@ impl quickcheck::Arbitrary for ChannelMessageWithoutChannel {
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         match self {
-            ChannelMessageWithoutChannel::Voice(x) => Box::new(x.shrink().map(ChannelMessageWithoutChannel::Voice)),
-            ChannelMessageWithoutChannel::Mode(x) => Box::new(x.shrink().map(ChannelMessageWithoutChannel::Mode)),
+            ChannelMessageWithoutChannel::Voice(x) => {
+                Box::new(x.shrink().map(ChannelMessageWithoutChannel::Voice))
+            }
+            ChannelMessageWithoutChannel::Mode(x) => {
+                Box::new(x.shrink().map(ChannelMessageWithoutChannel::Mode))
+            }
         }
     }
 }
@@ -158,7 +162,10 @@ pub struct Tempo(u32);
 impl Tempo {
     const MAX_BIT_SIZE: usize = 24;
     pub fn new(microseconds_per_quarter_note: u32) -> Option<Self> {
-        if microseconds_per_quarter_note > (2 ^ u32::try_from(Self::MAX_BIT_SIZE).expect("This will always fit in a u32, c'mon")) - 1 {
+        if microseconds_per_quarter_note
+            > (2 ^ u32::try_from(Self::MAX_BIT_SIZE).expect("This will always fit in a u32, c'mon"))
+                - 1
+        {
             None
         } else {
             Some(Self(microseconds_per_quarter_note))
@@ -171,7 +178,11 @@ impl quickcheck::Arbitrary for Tempo {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
         loop {
             if let Some(x) = Self::new(u32::arbitrary(&mut quickcheck::Gen::new(
-                if g.size() < Tempo::MAX_BIT_SIZE { g.size() } else { Tempo::MAX_BIT_SIZE },
+                if g.size() < Tempo::MAX_BIT_SIZE {
+                    g.size()
+                } else {
+                    Tempo::MAX_BIT_SIZE
+                },
             ))) {
                 return x;
             }
@@ -362,8 +373,13 @@ impl From<&MetaMessage> for Vec<u8> {
 impl From<&Event> for Vec<u8> {
     fn from(event: &Event) -> Self {
         match event {
-            Event::Midi(_) => todo!(),
-            Event::Sysex(_) => todo!(),
+            Event::Midi(ChannelMessage { message, channel }) => {
+                dbg!(message);
+                todo!("From<&Event> for Vec<u8> for Event::Midi")
+            }
+            Event::Sysex(SysexMessage { length, bytes }) => {
+                concat_vecs!(vec![0xF0], Vec::<u8>::from(length), bytes)
+            }
             Event::Meta(message) => {
                 concat_vecs!(vec![0xFF], Vec::<u8>::from(message))
             }
@@ -437,11 +453,26 @@ mod tests {
             let end_of_track = MetaMessage::EndOfTrack;
             let set_tempo = MetaMessage::SetTempo(Tempo::arbitrary(g));
             // TODO: SMPTEOffset is a little _too_ arbitrary; e.g. hundredths_of_a_frame should really never exceed 99...
-            let smpte_offset = MetaMessage::SMPTEOffset { hour: u8::arbitrary(g), minute: u8::arbitrary(g), second: u8::arbitrary(g), frame: u8::arbitrary(g), hundredths_of_a_frame: u8::arbitrary(g) };
+            let smpte_offset = MetaMessage::SMPTEOffset {
+                hour: u8::arbitrary(g),
+                minute: u8::arbitrary(g),
+                second: u8::arbitrary(g),
+                frame: u8::arbitrary(g),
+                hundredths_of_a_frame: u8::arbitrary(g),
+            };
             // TODO: TimeSignature is a little _too_ arbitrary; e.g. a denominator of 255 would represent a 2^-255th note
-            let time_signature = MetaMessage::TimeSignature { numerator: u8::arbitrary(g), denominator: u8::arbitrary(g), cc: u8::arbitrary(g), bb: u8::arbitrary(g)};
-            let key_signature = MetaMessage::KeySignature { sharps_or_flats: SharpsOrFlats::arbitrary(g), key_type: KeyType::arbitrary(g) };
-            let sequencer_specific_event = MetaMessage::SequencerSpecificEvent(Vec::<u8>::arbitrary(g));
+            let time_signature = MetaMessage::TimeSignature {
+                numerator: u8::arbitrary(g),
+                denominator: u8::arbitrary(g),
+                cc: u8::arbitrary(g),
+                bb: u8::arbitrary(g),
+            };
+            let key_signature = MetaMessage::KeySignature {
+                sharps_or_flats: SharpsOrFlats::arbitrary(g),
+                key_type: KeyType::arbitrary(g),
+            };
+            let sequencer_specific_event =
+                MetaMessage::SequencerSpecificEvent(Vec::<u8>::arbitrary(g));
             g.choose(&[
                 sequence_number,
                 text_event,
@@ -525,7 +556,7 @@ mod tests {
                 return SysexMessage {
                     length,
                     bytes: Vec::<u8>::with_capacity(0),
-                }
+                };
             }
 
             SysexMessage {
