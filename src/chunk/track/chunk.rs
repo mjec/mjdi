@@ -363,16 +363,24 @@ mod tests {
 
     impl Arbitrary for Event {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            let meta_message = MetaMessage::arbitrary(g);
             let channel_message = ChannelMessage::arbitrary(g);
             let sysex_message = SysexMessage::arbitrary(g);
+            let meta_message = MetaMessage::arbitrary(g);
             g.choose(&[
-                Event::Meta(meta_message),
                 Event::Midi(channel_message),
                 Event::Sysex(sysex_message),
+                Event::Meta(meta_message),
             ])
             .expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
             .clone()
+        }
+
+        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+            match self {
+                Event::Midi(x) => Box::new(x.shrink().map(Event::Midi)),
+                Event::Sysex(x) => Box::new(x.shrink().map(Event::Sysex)),
+                Event::Meta(x) => Box::new(x.shrink().map(Event::Meta)),
+            }
         }
     }
 
@@ -405,6 +413,11 @@ mod tests {
                 delta_time: Vlq::arbitrary(g),
                 event: Event::arbitrary(g),
             }
+        }
+
+        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+            // TODO: add an actual shrinker here. The trouble is, we have to shrink in both dimensions at once (delta_time and event)
+            quickcheck::empty_shrinker()
         }
     }
 
