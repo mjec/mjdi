@@ -94,6 +94,27 @@ pub enum ChannelMessageWithoutChannel {
     Mode(ModeMessage),
 }
 
+#[cfg(test)]
+impl quickcheck::Arbitrary for ChannelMessageWithoutChannel {
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        let voice = ChannelMessageWithoutChannel::Voice(VoiceMessage::arbitrary(g));
+        let mode = ChannelMessageWithoutChannel::Mode(ModeMessage::arbitrary(g));
+        g.choose(&[
+            voice,
+            mode,
+        ])
+        .expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
+        .clone()
+    }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        match self {
+            ChannelMessageWithoutChannel::Voice(x) => Box::new(x.shrink().map(ChannelMessageWithoutChannel::Voice)),
+            ChannelMessageWithoutChannel::Mode(x) => Box::new(x.shrink().map(ChannelMessageWithoutChannel::Mode)),
+        }
+    }
+}
+
 backed_enum! {
   pub enum VoiceMessage(u8, VoiceMessageError) {
     NoteOff = 0x80,
@@ -135,12 +156,32 @@ pub struct SysexMessage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tempo(u32);
 impl Tempo {
+    const MAX_BIT_SIZE: usize = 24;
     pub fn new(microseconds_per_quarter_note: u32) -> Option<Self> {
-        if microseconds_per_quarter_note > (2 ^ 24) - 1 {
+        if microseconds_per_quarter_note > (2 ^ u32::try_from(Self::MAX_BIT_SIZE).expect("This will always fit in a u32, c'mon")) - 1 {
             None
         } else {
             Some(Self(microseconds_per_quarter_note))
         }
+    }
+}
+
+#[cfg(test)]
+impl quickcheck::Arbitrary for Tempo {
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        loop {
+            if let Some(x) = Self::new(u32::arbitrary(&mut quickcheck::Gen::new(
+                if g.size() < Tempo::MAX_BIT_SIZE { g.size() } else { Tempo::MAX_BIT_SIZE },
+            ))) {
+                return x;
+            }
+        }
+    }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        Box::new(u32::shrink(&self.0).map(|x| {
+            Self::new(x).expect("x should always be decreasing, because we called shrink")
+        }))
     }
 }
 
@@ -152,7 +193,7 @@ backed_enum! {
 }
 
 backed_enum! {
-  pub enum SharpsOrFats(i8, SharpsOrFlatsError) {
+  pub enum SharpsOrFlats(i8, SharpsOrFlatsError) {
     SevenFlats = -7,
     SixFlats = -6,
     FiveFlats = -5,
@@ -201,7 +242,7 @@ pub enum MetaMessage {
         bb: u8,
     },
     KeySignature {
-        sharps_or_flats: SharpsOrFats,
+        sharps_or_flats: SharpsOrFlats,
         key_type: KeyType,
     },
     SequencerSpecificEvent(Vec<u8>),
@@ -352,8 +393,6 @@ impl TryFrom<&[u8]> for Chunk {
     }
 }
 
-// Putting this in cfg(false)for now, while I work on getting Event working.
-// #[cfg(FALSE)]
 #[cfg(test)]
 mod tests {
     use quickcheck::Arbitrary;
@@ -386,13 +425,95 @@ mod tests {
 
     impl Arbitrary for MetaMessage {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            todo!()
+            let sequence_number = MetaMessage::SequenceNumber(u16::arbitrary(g));
+            let text_event = MetaMessage::TextEvent(String::arbitrary(g));
+            let copyright_notice = MetaMessage::CopyrightNotice(String::arbitrary(g));
+            let sequence_name = MetaMessage::SequenceName(String::arbitrary(g));
+            let instrument_name = MetaMessage::InstrumentName(String::arbitrary(g));
+            let lyric = MetaMessage::Lyric(String::arbitrary(g));
+            let marker = MetaMessage::Marker(String::arbitrary(g));
+            let cue_point = MetaMessage::CuePoint(String::arbitrary(g));
+            let channel_prefix = MetaMessage::ChannelPrefix(u8::arbitrary(g));
+            let end_of_track = MetaMessage::EndOfTrack;
+            let set_tempo = MetaMessage::SetTempo(Tempo::arbitrary(g));
+            // TODO: SMPTEOffset is a little _too_ arbitrary; e.g. hundredths_of_a_frame should really never exceed 99...
+            let smpte_offset = MetaMessage::SMPTEOffset { hour: u8::arbitrary(g), minute: u8::arbitrary(g), second: u8::arbitrary(g), frame: u8::arbitrary(g), hundredths_of_a_frame: u8::arbitrary(g) };
+            // TODO: TimeSignature is a little _too_ arbitrary; e.g. a denominator of 255 would represent a 2^-255th note
+            let time_signature = MetaMessage::TimeSignature { numerator: u8::arbitrary(g), denominator: u8::arbitrary(g), cc: u8::arbitrary(g), bb: u8::arbitrary(g)};
+            let key_signature = MetaMessage::KeySignature { sharps_or_flats: SharpsOrFlats::arbitrary(g), key_type: KeyType::arbitrary(g) };
+            let sequencer_specific_event = MetaMessage::SequencerSpecificEvent(Vec::<u8>::arbitrary(g));
+            g.choose(&[
+                sequence_number,
+                text_event,
+                copyright_notice,
+                sequence_name,
+                instrument_name,
+                lyric,
+                marker,
+                cue_point,
+                channel_prefix,
+                end_of_track,
+                set_tempo,
+                smpte_offset,
+                time_signature,
+                key_signature,
+                sequencer_specific_event,
+            ])
+            .expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
+            .clone()
+        }
+
+        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+            match self {
+                MetaMessage::SequenceNumber(x) => {
+                    Box::new(x.shrink().map(MetaMessage::SequenceNumber))
+                }
+                MetaMessage::TextEvent(x) => Box::new(x.shrink().map(MetaMessage::TextEvent)),
+                MetaMessage::CopyrightNotice(x) => {
+                    Box::new(x.shrink().map(MetaMessage::CopyrightNotice))
+                }
+                MetaMessage::SequenceName(x) => Box::new(x.shrink().map(MetaMessage::SequenceName)),
+                MetaMessage::InstrumentName(x) => {
+                    Box::new(x.shrink().map(MetaMessage::InstrumentName))
+                }
+                MetaMessage::Lyric(x) => Box::new(x.shrink().map(MetaMessage::Lyric)),
+                MetaMessage::Marker(x) => Box::new(x.shrink().map(MetaMessage::Marker)),
+                MetaMessage::CuePoint(x) => Box::new(x.shrink().map(MetaMessage::CuePoint)),
+                MetaMessage::ChannelPrefix(x) => {
+                    Box::new(x.shrink().map(MetaMessage::ChannelPrefix))
+                }
+                MetaMessage::EndOfTrack => Box::new(std::iter::once(MetaMessage::EndOfTrack)),
+                MetaMessage::SetTempo(x) => Box::new(x.shrink().map(MetaMessage::SetTempo)),
+                MetaMessage::SMPTEOffset {
+                    hour,
+                    minute,
+                    second,
+                    frame,
+                    hundredths_of_a_frame,
+                } => todo!(),
+                MetaMessage::TimeSignature {
+                    numerator,
+                    denominator,
+                    cc,
+                    bb,
+                } => todo!(),
+                MetaMessage::KeySignature {
+                    sharps_or_flats,
+                    key_type,
+                } => todo!(),
+                MetaMessage::SequencerSpecificEvent(x) => {
+                    Box::new(x.shrink().map(MetaMessage::SequencerSpecificEvent))
+                }
+            }
         }
     }
 
     impl Arbitrary for ChannelMessage {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            todo!()
+            ChannelMessage {
+                message: ChannelMessageWithoutChannel::arbitrary(g),
+                channel: u8::arbitrary(g),
+            }
         }
     }
 
@@ -400,9 +521,16 @@ mod tests {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
             let length = Vlq::arbitrary(g);
 
+            if u32::from(length) == 0u32 {
+                return SysexMessage {
+                    length,
+                    bytes: Vec::<u8>::with_capacity(0),
+                }
+            }
+
             SysexMessage {
                 length,
-                bytes: Vec::<u8>::arbitrary(&mut quickcheck::Gen::new(usize::try_from(u32::from(length)).expect("usize should be large enough for a length, hopefully. If not, who knows what could happen."))),
+                bytes: Vec::<u8>::arbitrary(g), // &mut quickcheck::Gen::new(usize::try_from(u32::from(dbg!(length))).expect("usize should be large enough for a length, hopefully. If not, who knows what could happen."))),
             }
         }
     }
@@ -432,7 +560,7 @@ mod tests {
                 "We expect all VLQs to be at most four bytes, per the spec."
             );
             let event_bytes = Vec::<u8>::from(&event.event);
-            debug_assert!(event_bytes.len() == 1, "We're forcing this to be true but... at some point we might not? Who am I kidding, this assert is entirely here for symmetry purposes.");
+            // debug_assert!(event_bytes.len() == 1, "We're forcing this to be true but... at some point we might not? Who am I kidding, this assert is entirely here for symmetry purposes.");
 
             payload_bytes.extend(dt_bytes);
             payload_bytes.extend(event_bytes);
