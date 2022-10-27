@@ -550,19 +550,17 @@ mod tests {
 
     impl Arbitrary for SysexMessage {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            let length = Vlq::arbitrary(g);
+            let bytes = Vec::<u8>::arbitrary(&mut quickcheck::Gen::new(
+                if g.size() < crate::vlq::MAX_REPRESENTABLE as usize {
+                    g.size()
+                } else {
+                    crate::vlq::MAX_REPRESENTABLE as usize
+                },
+            ));
+            let length = Vlq::try_from(bytes.len() as u32)
+                .expect("This should always be smaller than MAX_REPRESENTABLE");
 
-            if u32::from(length) == 0u32 {
-                return SysexMessage {
-                    length,
-                    bytes: Vec::<u8>::with_capacity(0),
-                };
-            }
-
-            SysexMessage {
-                length,
-                bytes: Vec::<u8>::arbitrary(g), // &mut quickcheck::Gen::new(usize::try_from(u32::from(dbg!(length))).expect("usize should be large enough for a length, hopefully. If not, who knows what could happen."))),
-            }
+            SysexMessage { length, bytes }
         }
     }
 
