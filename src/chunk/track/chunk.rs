@@ -131,6 +131,15 @@ backed_enum! {
   }
 }
 
+impl VoiceMessage {
+    fn to_be_bytes(&self, channel: u8) -> [u8; 2] {
+        // signature is  wrong
+        assert!(channel < 16);
+        todo!("VoiceMessage::to_be_bytes");
+        [*self as u8 | channel, *self as u8] // Not even close to right
+    }
+}
+
 backed_enum! {
   pub enum ModeMessage(u8, ModeMessageError) {
     AllSoundOff = 120,
@@ -373,9 +382,17 @@ impl From<&MetaMessage> for Vec<u8> {
 impl From<&Event> for Vec<u8> {
     fn from(event: &Event) -> Self {
         match event {
-            Event::Midi(ChannelMessage { message, channel }) => {
-                dbg!(message);
-                todo!("From<&Event> for Vec<u8> for Event::Midi")
+            Event::Midi(ChannelMessage {
+                message: ChannelMessageWithoutChannel::Voice(voice_message),
+                channel,
+            }) => {
+                concat_vecs!(Vec::from(voice_message.to_be_bytes(*channel)))
+            }
+            Event::Midi(ChannelMessage {
+                message: ChannelMessageWithoutChannel::Mode(mode_message),
+                channel,
+            }) => {
+                concat_vecs!(Vec::from(mode_message.to_be_bytes(*channel)))
             }
             Event::Sysex(SysexMessage { length, bytes }) => {
                 concat_vecs!(vec![0xF0], Vec::<u8>::from(length), bytes)
@@ -449,7 +466,13 @@ mod tests {
             let lyric = MetaMessage::Lyric(String::arbitrary(g));
             let marker = MetaMessage::Marker(String::arbitrary(g));
             let cue_point = MetaMessage::CuePoint(String::arbitrary(g));
-            let channel_prefix = MetaMessage::ChannelPrefix(u8::arbitrary(g));
+            let channel_prefix = {
+                let mut prefix = u8::arbitrary(g);
+                while prefix >= 16 {
+                    prefix = u8::arbitrary(g);
+                }
+                MetaMessage::ChannelPrefix(prefix)
+            };
             let end_of_track = MetaMessage::EndOfTrack;
             let set_tempo = MetaMessage::SetTempo(Tempo::arbitrary(g));
             // TODO: SMPTEOffset is a little _too_ arbitrary; e.g. hundredths_of_a_frame should really never exceed 99...
@@ -541,9 +564,13 @@ mod tests {
 
     impl Arbitrary for ChannelMessage {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let mut channel = u8::arbitrary(g);
+            while channel >= 16 {
+                channel = u8::arbitrary(g);
+            }
             ChannelMessage {
                 message: ChannelMessageWithoutChannel::arbitrary(g),
-                channel: u8::arbitrary(g),
+                channel,
             }
         }
     }
