@@ -35,12 +35,12 @@ impl Display for Vlq {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum VLQError {
+pub enum VlqError {
     OverMaxSize,
 }
 
 impl TryFrom<u32> for Vlq {
-    type Error = VLQError;
+    type Error = VlqError;
 
     fn try_from(mut n: u32) -> Result<Self, Self::Error> {
         if n > MAX_REPRESENTABLE {
@@ -209,7 +209,7 @@ mod tests {
     #[quickcheck]
     fn round_trip_from_and_to_u32_works(n: u32) {
         if n > MAX_REPRESENTABLE {
-            assert_eq!(Vlq::try_from(n), Err(VLQError::OverMaxSize));
+            assert_eq!(Vlq::try_from(n), Err(VlqError::OverMaxSize));
         } else {
             assert_eq!(Vlq::try_from(n).map(u32::from), Ok(n));
         }

@@ -12,4 +12,10 @@ pub(crate) mod brandenburg {
             crate::chunk::header::Division::TicksPerQuarterNote(NonZeroU16::new(1024).unwrap()),
         )
     }
+
+    pub(crate) fn expected_track() -> crate::chunk::track::chunk::Chunk {
+        crate::chunk::track::chunk::Chunk {
+            events: crate::chunk::track::chunk::EventsList(vec![]),
+        }
+    }
 }

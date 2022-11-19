@@ -33,7 +33,6 @@ impl From<Division> for Vec<u8> {
 }
 
 backed_enum!(
-  #[derive(Copy)]
   pub enum SMPTETimecodeFormat(i8, SMPTETimecodeFormatError) {
     TwentyFour = -24,
     TwentyFive = -25,
