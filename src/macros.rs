@@ -20,7 +20,7 @@ macro_rules! backed_enum {
 
     #[derive(Debug, PartialEq, Eq)]
     $vis enum $error_type_name {
-      InvalidValue,
+      InvalidValue($repr),
       $($($additional_error_variant,)*)?
     }
 
@@ -30,7 +30,7 @@ macro_rules! backed_enum {
       fn try_from(value: $repr) -> Result<Self, Self::Error> {
         match value {
           $(x if x == $enum_name::$name as $repr => Ok($enum_name::$name), )*
-          _ => Err(Self::Error::InvalidValue),
+          x => Err(Self::Error::InvalidValue(x)),
         }
       }
     }

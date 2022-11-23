@@ -78,7 +78,7 @@ fn division_ticks_per_frame_broad(value: u16) -> TestResult {
         TestResult::from_bool(
             Division::try_from(value)
                 == Err(DivisionError::SMPTETimecodeFormatError(
-                    SMPTETimecodeFormatError::InvalidValue,
+                    SMPTETimecodeFormatError::InvalidValue(value.to_be_bytes()[0] as i8),
                 )),
         )
     } else if value.to_be_bytes()[1] == 0 {
@@ -122,7 +122,7 @@ fn division_fuzz(value: u16) {
         assert_eq!(
             Division::try_from(value),
             Err(DivisionError::SMPTETimecodeFormatError(
-                SMPTETimecodeFormatError::InvalidValue,
+                SMPTETimecodeFormatError::InvalidValue(value.to_be_bytes()[0] as i8),
             ))
         );
     } else if value.to_be_bytes()[1] == 0 {

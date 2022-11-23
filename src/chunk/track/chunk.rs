@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, string::FromUtf8Error};
 
 use crate::vlq::{Vlq, VlqError};
 
@@ -48,6 +48,7 @@ impl From<Chunk> for Vec<u8> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ChunkError {
+    NotEnoughBytes,
     SliceSize,
     ChunkType,
     ChunkLength { expected: u32 },
@@ -197,10 +198,15 @@ impl quickcheck::Arbitrary for VoiceMessageData {
                 note_number: U7::arbitrary(g),
                 velocity: U7::arbitrary(g),
             },
-            VoiceMessage::NoteOn => VoiceMessageData::NoteOn,
+            VoiceMessage::NoteOn => VoiceMessageData::NoteOn {
+                note_number: U7::arbitrary(g),
+                velocity: U7::arbitrary(g),
+            },
             VoiceMessage::PolyKeyPressure => VoiceMessageData::PolyKeyPressure,
             VoiceMessage::ControlChange => VoiceMessageData::ControlChange,
-            VoiceMessage::ProgramChange => VoiceMessageData::ProgramChange,
+            VoiceMessage::ProgramChange => VoiceMessageData::ProgramChange {
+                program_number: U7::arbitrary(g),
+            },
             VoiceMessage::ChannelPressure => VoiceMessageData::ChannelPressure,
             VoiceMessage::PitchBend => VoiceMessageData::PitchBend,
         }
@@ -222,17 +228,6 @@ impl quickcheck::Arbitrary for ChannelMessage {
         .expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
         .clone()
     }
-
-    // fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-    //     match self {
-    //         ChannelMessageWithoutChannel::Voice(x) => {
-    //             Box::new(x.shrink().map(ChannelMessageWithoutChannel::Voice))
-    //         }
-    //         ChannelMessageWithoutChannel::Mode(x) => {
-    //             Box::new(x.shrink().map(ChannelMessageWithoutChannel::Mode))
-    //         }
-    //     }
-    // }
 }
 
 backed_enum! {
@@ -247,24 +242,13 @@ backed_enum! {
   }
 }
 
-impl VoiceMessage {
-    const NOTE_OFF: u8 = 0x80;
-
-    fn to_be_bytes(&self, channel: u8) -> [u8; 2] {
-        // signature is  wrong
-        assert!(channel < 16);
-        todo!("VoiceMessage::to_be_bytes");
-        [*self as u8 | channel, *self as u8] // Not even close to right
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VoiceMessageData {
     NoteOff { note_number: U7, velocity: U7 },
-    NoteOn,
+    NoteOn { note_number: U7, velocity: U7 },
     PolyKeyPressure,
     ControlChange,
-    ProgramChange,
+    ProgramChange { program_number: U7 },
     ChannelPressure,
     PitchBend,
 }
@@ -274,10 +258,10 @@ impl VoiceMessageData {
     pub fn get_first_nibble(&self) -> u8 {
         let result = match self {
             VoiceMessageData::NoteOff { .. } => VoiceMessage::NoteOff.into(),
-            VoiceMessageData::NoteOn => VoiceMessage::NoteOn.into(),
+            VoiceMessageData::NoteOn { .. } => VoiceMessage::NoteOn.into(),
             VoiceMessageData::PolyKeyPressure => VoiceMessage::PolyKeyPressure.into(),
             VoiceMessageData::ControlChange => VoiceMessage::ControlChange.into(),
-            VoiceMessageData::ProgramChange => VoiceMessage::ProgramChange.into(),
+            VoiceMessageData::ProgramChange { .. } => VoiceMessage::ProgramChange.into(),
             VoiceMessageData::ChannelPressure => VoiceMessage::ChannelPressure.into(),
             VoiceMessageData::PitchBend => VoiceMessage::PitchBend.into(),
         };
@@ -295,6 +279,33 @@ impl VoiceMessageData {
     }
 }
 
+impl Parse for Vlq {
+    type ParseError = VlqError;
+
+    fn parse(bytes: &[u8]) -> Result<(Self, &[u8]), Self::ParseError> {
+        if bytes.is_empty() {
+            return Err(VlqError::NotEnoughBytes);
+        }
+        let mut remainder = bytes;
+        let mut result: u32 = 0;
+        let mut i: u8 = 0;
+        loop {
+            if remainder.is_empty() {
+                return Err(VlqError::NotEnoughBytes);
+            }
+            i += 1;
+            result <<= 7;
+            result += u32::from(remainder[0] & 0x7F);
+            let should_continue = i < 4 && remainder[0] & 0x80 > 0;
+            remainder = &remainder[1..];
+            if !should_continue {
+                break;
+            }
+        }
+        Ok((Vlq::try_from(result)?, remainder))
+    }
+}
+
 impl Parse for VoiceMessageData {
     type ParseError = VoiceMessageDataError;
 
@@ -307,9 +318,9 @@ impl Parse for VoiceMessageData {
         };
 
         let u7_from_byte_at = |index: usize,
-                               error_construtor: fn(U7Error) -> VoiceMessageDataError|
+                               error_constructor: fn(U7Error) -> VoiceMessageDataError|
          -> Result<U7, VoiceMessageDataError> {
-            U7::try_from(get_byte_at(index)?).map_err(error_construtor)
+            U7::try_from(get_byte_at(index)?).map_err(error_constructor)
         };
 
         match get_byte_at(0)? & 0b1111_0000 {
@@ -320,17 +331,28 @@ impl Parse for VoiceMessageData {
                 },
                 &bytes[3..], // Safe because bytes[2] exists, so bytes[3..] is at least []
             )),
-            x if x == VoiceMessage::NoteOn.into() => todo!("VoiceMessage::NoteOn"),
+            x if x == VoiceMessage::NoteOn.into() => Ok((
+                Self::NoteOn {
+                    note_number: u7_from_byte_at(1, VoiceMessageDataError::NoteNumber)?,
+                    velocity: u7_from_byte_at(2, VoiceMessageDataError::Velocity)?,
+                },
+                &bytes[3..], // Safe because bytes[2] exists, so bytes[3..] is at least []
+            )),
             x if x == VoiceMessage::PolyKeyPressure.into() => {
                 todo!("VoiceMessage::PolyKeyPressure")
             }
             x if x == VoiceMessage::ControlChange.into() => todo!("VoiceMessage::ControlChange"),
-            x if x == VoiceMessage::ProgramChange.into() => todo!("VoiceMessage::ProgramChange"),
+            x if x == VoiceMessage::ProgramChange.into() => Ok((
+                Self::ProgramChange {
+                    program_number: u7_from_byte_at(1, VoiceMessageDataError::ProgramNumber)?,
+                },
+                &bytes[2..]
+            )),
             x if x == VoiceMessage::ChannelPressure.into() => {
                 todo!("VoiceMessage::ChannelPressure")
             }
             x if x == VoiceMessage::PitchBend.into() => todo!("VoiceMessage::PitchBend"),
-            otherwise => Err(VoiceMessageDataError::MessageType),
+            _ => Err(VoiceMessageDataError::MessageType),
         }
     }
 }
@@ -341,6 +363,7 @@ pub enum VoiceMessageDataError {
     MessageType,
     NoteNumber(U7Error),
     Velocity(U7Error),
+    ProgramNumber(U7Error),
 }
 
 impl Display for VoiceMessageDataError {
@@ -367,7 +390,7 @@ impl std::ops::BitOr<VoiceMessage> for Channel {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct U7(u8);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -442,7 +465,7 @@ backed_enum! {
 }
 
 impl ModeMessage {
-    fn to_be_bytes(&self, channel: u8) -> [u8; 2] {
+    fn to_be_bytes(self, channel: u8) -> [u8; 2] {
         assert!(channel < 16);
         [VoiceMessage::ControlChange as u8 | channel, self.into()]
     }
@@ -469,10 +492,7 @@ pub struct Tempo(u32);
 impl Tempo {
     const MAX_BIT_SIZE: usize = 24;
     pub fn new(microseconds_per_quarter_note: u32) -> Option<Self> {
-        if microseconds_per_quarter_note
-            > (2 ^ u32::try_from(Self::MAX_BIT_SIZE).expect("This will always fit in a u32, c'mon"))
-                - 1
-        {
+        if microseconds_per_quarter_note > (1 << Self::MAX_BIT_SIZE) - 1 {
             None
         } else {
             Some(Self(microseconds_per_quarter_note))
@@ -484,13 +504,7 @@ impl Tempo {
 impl quickcheck::Arbitrary for Tempo {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
         loop {
-            if let Some(x) = Self::new(u32::arbitrary(&mut quickcheck::Gen::new(
-                if g.size() < Tempo::MAX_BIT_SIZE {
-                    g.size()
-                } else {
-                    Tempo::MAX_BIT_SIZE
-                },
-            ))) {
+            if let Some(x) = Self::new(u32::arbitrary(g)) {
                 return x;
             }
         }
@@ -570,10 +584,111 @@ impl Parse for MetaMessage {
     type ParseError = MetaMessageError;
 
     fn parse(bytes: &[u8]) -> Result<(Self, &[u8]), Self::ParseError> {
-        if bytes.len() < 3 {
-            Err(MetaMessageError::NotEnoughBytes)
+        if bytes.len() < 2 {
+            return Err(MetaMessageError::NotEnoughBytes);
+        }
+
+        let extract_text_event = |ctor: fn(String) -> Self| {
+            let len = usize::from(bytes[1]);
+            if bytes.len() < 2 + len {
+                return Err(MetaMessageError::NotEnoughBytes);
+            }
+            Ok((
+                ctor(String::from_utf8(bytes[2..(2 + len)].to_vec())?),
+                &bytes[2 + len..],
+            ))
+        };
+
+        if bytes[0] == 0x00 && bytes[1] == 0x02 {
+            Ok((
+                Self::SequenceNumber(u16::from_be_bytes([bytes[2], bytes[3]])),
+                &bytes[4..],
+            ))
+        } else if bytes[0] == 0x01 {
+            extract_text_event(Self::TextEvent)
+        } else if bytes[0] == 0x02 {
+            extract_text_event(Self::CopyrightNotice)
+        } else if bytes[0] == 0x03 {
+            extract_text_event(Self::SequenceName)
+        } else if bytes[0] == 0x04 {
+            extract_text_event(Self::InstrumentName)
+        } else if bytes[0] == 0x05 {
+            extract_text_event(Self::Lyric)
+        } else if bytes[0] == 0x06 {
+            extract_text_event(Self::Marker)
+        } else if bytes[0] == 0x07 {
+            extract_text_event(Self::CuePoint)
+        } else if bytes[0] == 0x20 && bytes[1] == 0x01 {
+            Ok((
+                Self::ChannelPrefix(*bytes.get(2).ok_or(MetaMessageError::NotEnoughBytes)?),
+                &bytes[3..],
+            ))
+        } else if bytes[0] == 0x2F && bytes[1] == 0x00 {
+            Ok((Self::EndOfTrack, &bytes[2..]))
+        } else if bytes[0] == 0x51 && bytes[1] == 0x03 {
+            if bytes.len() < 5 {
+                Err(MetaMessageError::NotEnoughBytes)
+            } else {
+                Ok((
+                    Self::SetTempo(
+                        Tempo::new(u32::from_be_bytes([0x00, bytes[2], bytes[3], bytes[4]]))
+                            .expect("Top byte is zero"),
+                    ),
+                    &bytes[5..],
+                ))
+            }
+        } else if bytes[0] == 0x54 && bytes[1] == 0x05 {
+            if bytes.len() < 7 {
+                Err(MetaMessageError::NotEnoughBytes)
+            } else {
+                Ok((
+                    Self::SMPTEOffset {
+                        hour: bytes[2],
+                        minute: bytes[3],
+                        second: bytes[4],
+                        frame: bytes[5],
+                        hundredths_of_a_frame: bytes[6],
+                    },
+                    &bytes[7..],
+                ))
+            }
+        } else if bytes[0] == 0x58 && bytes[1] == 0x04 {
+            if bytes.len() < 6 {
+                Err(MetaMessageError::NotEnoughBytes)
+            } else {
+                Ok((
+                    Self::TimeSignature {
+                        numerator: bytes[2],
+                        denominator: bytes[3],
+                        cc: bytes[4],
+                        bb: bytes[5],
+                    },
+                    &bytes[6..],
+                ))
+            }
+        } else if bytes[0] == 0x59 && bytes[1] == 0x02 {
+            if bytes.len() < 4 {
+                Err(MetaMessageError::NotEnoughBytes)
+            } else {
+                Ok((
+                    Self::KeySignature {
+                        sharps_or_flats: SharpsOrFlats::try_from(bytes[2] as i8)?,
+                        key_type: KeyType::try_from(bytes[3])?,
+                    },
+                    &bytes[4..],
+                ))
+            }
+        } else if bytes[0] == 0x7F {
+            let len = usize::from(bytes[1]);
+            if bytes.len() < 2 + len {
+                return Err(MetaMessageError::NotEnoughBytes);
+            }
+            Ok((
+                Self::SequencerSpecificEvent(Vec::from(&bytes[2..2 + len])),
+                &bytes[2 + len..],
+            ))
         } else {
-            todo!()
+            Err(MetaMessageError::Unrecognized([bytes[0], bytes[1]]))
         }
     }
 }
@@ -581,6 +696,28 @@ impl Parse for MetaMessage {
 #[derive(Debug, PartialEq, Eq)]
 pub enum MetaMessageError {
     NotEnoughBytes,
+    Unrecognized([u8; 2]),
+    TextIsNotUtf8(FromUtf8Error),
+    KeyType(KeyTypeError),
+    SharpsOrFlats(SharpsOrFlatsError),
+}
+
+impl From<KeyTypeError> for MetaMessageError {
+    fn from(value: KeyTypeError) -> Self {
+        Self::KeyType(value)
+    }
+}
+
+impl From<SharpsOrFlatsError> for MetaMessageError {
+    fn from(value: SharpsOrFlatsError) -> Self {
+        Self::SharpsOrFlats(value)
+    }
+}
+
+impl From<FromUtf8Error> for MetaMessageError {
+    fn from(value: FromUtf8Error) -> Self {
+        Self::TextIsNotUtf8(value)
+    }
 }
 
 impl From<&MetaMessage> for Vec<u8> {
@@ -676,12 +813,7 @@ impl From<&MetaMessage> for Vec<u8> {
             MetaMessage::KeySignature {
                 sharps_or_flats,
                 key_type,
-            } => vec![
-                0x59,
-                0x02,
-                sharps_or_flats.clone() as u8,
-                key_type.clone() as u8,
-            ],
+            } => vec![0x59, 0x02, *sharps_or_flats as u8, *key_type as u8],
             MetaMessage::SequencerSpecificEvent(bytes) => {
                 debug_assert!(u32::try_from(bytes.len()).unwrap() <= crate::vlq::MAX_REPRESENTABLE);
                 concat_vecs!(
@@ -708,36 +840,35 @@ impl From<&Event> for Vec<u8> {
     }
 }
 
-impl TryFrom<&[u8]> for Chunk {
-    type Error = ChunkError;
+impl Parse for Chunk {
+    type ParseError = ChunkError;
 
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+    fn parse(value: &[u8]) -> Result<(Self, &[u8]), Self::ParseError> {
         if value.len() < 10 {
-            Err(ChunkError::SliceSize)
+            return Err(ChunkError::SliceSize);
         } else if value[0..4] != Vec::<u8>::from(crate::chunk::ChunkType::Track) {
-            Err(ChunkError::ChunkType)
-        } else if u32::from_be_bytes([value[4], value[5], value[6], value[7]])
-            != (value.len() - 8)
-                .try_into()
-                .map_err(|_| ChunkError::SliceSize)?
-        {
-            Err(ChunkError::ChunkLength {
-                expected: 8 + u32::from_be_bytes([value[4], value[5], value[6], value[7]]),
-            })
-        } else {
-            let mut events = EventsList(Vec::new());
-            let mut remainder = &value[8..];
-            loop {
-                events.0.push(match Option::<MTrkEvent>::parse(remainder)? {
-                    (Some(event), inner_remainder) => {
-                        remainder = inner_remainder;
-                        event
-                    }
-                    (None, _) => break,
-                });
-            }
-            Ok(Chunk { events })
+            return Err(ChunkError::ChunkType);
         }
+
+        let chunk_length =
+            usize::try_from(u32::from_be_bytes([value[4], value[5], value[6], value[7]]))
+                .expect("usize >= u32");
+        if value.len() - 8 < chunk_length {
+            return Err(ChunkError::NotEnoughBytes);
+        }
+
+        let mut events = EventsList(Vec::new());
+        let mut remainder = &value[8..8 + chunk_length];
+        loop {
+            events.0.push(match Option::<MTrkEvent>::parse(remainder)? {
+                (Some(event), inner_remainder) => {
+                    remainder = inner_remainder;
+                    event
+                }
+                (None, _) => break,
+            });
+        }
+        Ok((Chunk { events }, &value[8 + chunk_length..]))
     }
 }
 
@@ -757,12 +888,12 @@ impl Parse for Option<MTrkEvent> {
         if bytes.is_empty() {
             return Ok((None, bytes));
         }
-        if bytes.len() < 5 {
+        if bytes.len() < 4 {
+            dbg!(bytes);
             return Err(MTrkEventError::NotEnoughBytes);
         }
-        let delta_time =
-            Vlq::try_from(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))?;
-        let (event, remainder) = Event::parse(&bytes[4..])?;
+        let (delta_time, remainder) = Vlq::parse(bytes)?;
+        let (event, remainder) = Event::parse(remainder)?;
         Ok((Some(MTrkEvent { delta_time, event }), remainder))
     }
 }
@@ -771,7 +902,7 @@ impl Parse for Event {
     type ParseError = EventError;
 
     fn parse(bytes: &[u8]) -> Result<(Self, &[u8]), Self::ParseError> {
-        if bytes.len() < 1 {
+        if bytes.is_empty() {
             Err(EventError::NotEnoughBytes)
         } else if bytes[0] == 0xF0 {
             todo!()
@@ -1016,9 +1147,17 @@ mod tests {
 
     #[test]
     fn chunk_from_brandenburg_concerto() {
-        assert_eq!(
-            Chunk::try_from(&crate::test_data::brandenburg::DATA[14..(14 + 35)]),
-            Ok(crate::test_data::brandenburg::expected_track())
-        );
+        let mut remainder: &[u8] = &crate::test_data::brandenburg::DATA[14..];
+        while !remainder.is_empty() {
+            let mut chunk: Chunk;
+            (chunk, remainder) =
+                Chunk::parse(remainder).expect("Should successfully parse first chunk of file");
+            dbg!(chunk);
+        }
+        assert!(false, "Gotta get that juicy debug output somehow?!");
+        // assert_eq!(
+        //     first_chunk,
+        //     crate::test_data::brandenburg::expected_track()
+        // );
     }
 }

@@ -37,6 +37,7 @@ impl Display for Vlq {
 #[derive(Debug, PartialEq, Eq)]
 pub enum VlqError {
     OverMaxSize,
+    NotEnoughBytes,
 }
 
 impl TryFrom<u32> for Vlq {
