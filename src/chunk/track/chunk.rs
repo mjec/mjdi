@@ -49,9 +49,7 @@ impl From<Chunk> for Vec<u8> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ChunkError {
     NotEnoughBytes,
-    SliceSize,
     ChunkType,
-    ChunkLength { expected: u32 },
     MTrkEventError(MTrkEventError),
 }
 
@@ -346,7 +344,7 @@ impl Parse for VoiceMessageData {
                 Self::ProgramChange {
                     program_number: u7_from_byte_at(1, VoiceMessageDataError::ProgramNumber)?,
                 },
-                &bytes[2..]
+                &bytes[2..],
             )),
             x if x == VoiceMessage::ChannelPressure.into() => {
                 todo!("VoiceMessage::ChannelPressure")
@@ -845,7 +843,7 @@ impl Parse for Chunk {
 
     fn parse(value: &[u8]) -> Result<(Self, &[u8]), Self::ParseError> {
         if value.len() < 10 {
-            return Err(ChunkError::SliceSize);
+            return Err(ChunkError::NotEnoughBytes);
         } else if value[0..4] != Vec::<u8>::from(crate::chunk::ChunkType::Track) {
             return Err(ChunkError::ChunkType);
         }
@@ -859,14 +857,10 @@ impl Parse for Chunk {
 
         let mut events = EventsList(Vec::new());
         let mut remainder = &value[8..8 + chunk_length];
-        loop {
-            events.0.push(match Option::<MTrkEvent>::parse(remainder)? {
-                (Some(event), inner_remainder) => {
-                    remainder = inner_remainder;
-                    event
-                }
-                (None, _) => break,
-            });
+        while !remainder.is_empty() {
+            let event: MTrkEvent;
+            (event, remainder) = MTrkEvent::parse(remainder)?;
+            events.0.push(event);
         }
         Ok((Chunk { events }, &value[8 + chunk_length..]))
     }
@@ -881,20 +875,16 @@ where
     fn parse(bytes: &[u8]) -> Result<(Self, &[u8]), Self::ParseError>;
 }
 
-impl Parse for Option<MTrkEvent> {
+impl Parse for MTrkEvent {
     type ParseError = MTrkEventError;
 
-    fn parse(bytes: &[u8]) -> Result<(Option<MTrkEvent>, &[u8]), MTrkEventError> {
-        if bytes.is_empty() {
-            return Ok((None, bytes));
-        }
+    fn parse(bytes: &[u8]) -> Result<(MTrkEvent, &[u8]), MTrkEventError> {
         if bytes.len() < 4 {
-            dbg!(bytes);
             return Err(MTrkEventError::NotEnoughBytes);
         }
         let (delta_time, remainder) = Vlq::parse(bytes)?;
         let (event, remainder) = Event::parse(remainder)?;
-        Ok((Some(MTrkEvent { delta_time, event }), remainder))
+        Ok((MTrkEvent { delta_time, event }, remainder))
     }
 }
 
