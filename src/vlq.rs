@@ -35,12 +35,13 @@ impl Display for Vlq {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum VLQError {
+pub enum VlqError {
     OverMaxSize,
+    NotEnoughBytes,
 }
 
 impl TryFrom<u32> for Vlq {
-    type Error = VLQError;
+    type Error = VlqError;
 
     fn try_from(mut n: u32) -> Result<Self, Self::Error> {
         if n > MAX_REPRESENTABLE {
@@ -80,17 +81,20 @@ impl From<&Vlq> for u32 {
     }
 }
 
+impl From<&Vlq> for Vec<u8> {
+    fn from(vlq: &Vlq) -> Self {
+        let mut result = Vec::<u8>::from(&vlq.bytes[0..vlq.size]);
+        result.reverse(); // There must be a reason why this fuckery is necessary, but I've already forgotten it.
+        result
+    }
+}
+
 impl IntoIterator for Vlq {
     type Item = u8;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut result = Vec::<u8>::with_capacity(4);
-        for i in 0..self.size {
-            result.push(self.bytes[i]);
-        }
-        result.reverse();
-        result.into_iter()
+        Vec::<u8>::from(&self).into_iter()
     }
 }
 
@@ -206,7 +210,7 @@ mod tests {
     #[quickcheck]
     fn round_trip_from_and_to_u32_works(n: u32) {
         if n > MAX_REPRESENTABLE {
-            assert_eq!(Vlq::try_from(n), Err(VLQError::OverMaxSize));
+            assert_eq!(Vlq::try_from(n), Err(VlqError::OverMaxSize));
         } else {
             assert_eq!(Vlq::try_from(n).map(u32::from), Ok(n));
         }

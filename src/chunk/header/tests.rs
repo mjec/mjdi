@@ -78,7 +78,7 @@ fn division_ticks_per_frame_broad(value: u16) -> TestResult {
         TestResult::from_bool(
             Division::try_from(value)
                 == Err(DivisionError::SMPTETimecodeFormatError(
-                    SMPTETimecodeFormatError::InvalidValue,
+                    SMPTETimecodeFormatError::InvalidValue(value.to_be_bytes()[0] as i8),
                 )),
         )
     } else if value.to_be_bytes()[1] == 0 {
@@ -122,7 +122,7 @@ fn division_fuzz(value: u16) {
         assert_eq!(
             Division::try_from(value),
             Err(DivisionError::SMPTETimecodeFormatError(
-                SMPTETimecodeFormatError::InvalidValue,
+                SMPTETimecodeFormatError::InvalidValue(value.to_be_bytes()[0] as i8),
             ))
         );
     } else if value.to_be_bytes()[1] == 0 {
@@ -163,6 +163,28 @@ impl Arbitrary for Division {
                 }
             }
     }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        match self {
+            Division::TicksPerQuarterNote(ticks) => {
+                Box::new(NonZeroU16::shrink(&ticks.clone()).map(Division::TicksPerQuarterNote))
+            }
+            Division::SubdivisionsOfASecond {
+                timecode_format,
+                ticks_per_frame,
+            } => {
+                let inner_timecode_format = *timecode_format;
+                Box::new(
+                    NonZeroU8::shrink(&ticks_per_frame.clone()).map(move |ticks_per_frame| {
+                        Division::SubdivisionsOfASecond {
+                            timecode_format: inner_timecode_format,
+                            ticks_per_frame,
+                        }
+                    }),
+                )
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -172,10 +194,9 @@ struct FourteenBytes {
 
 impl Arbitrary for FourteenBytes {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-        let alphabet = Vec::from_iter(0u8..=255u8);
         let mut result = FourteenBytes { data: [0u8; 14] };
         for i in 0..14 {
-            result.data[i] = *g.choose(&alphabet).expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
+            result.data[i] = u8::arbitrary(g)
         }
         result
     }

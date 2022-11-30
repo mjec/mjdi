@@ -3,11 +3,16 @@
 /// that the TryFrom implementation is exhaustive and matches the Enum.
 /// This also generates a quickcheck::Arbitrary implementation for the enum under cfg(test).
 macro_rules! backed_enum {
-  ($(#[$meta:meta])* $vis:vis enum $enum_name:ident($repr:ty, $error_type_name:ident) {
-    $($name:ident $(= $val:expr)?,)+
-  }) => {
+  (
+    $(#[$meta:meta])* $vis:vis enum $enum_name:ident($repr:ty, $error_type_name:ident) {
+      $($name:ident $(= $val:expr)?,)+
+    }
+    $({
+      $($additional_error_variant:ident,)+
+    })?
+  ) => {
     $(#[$meta])*
-    #[derive(Debug, PartialEq, Eq, Clone)]
+    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
     #[repr($repr)]
     $vis enum $enum_name {
       $($name $(= $val)?,)*
@@ -15,7 +20,8 @@ macro_rules! backed_enum {
 
     #[derive(Debug, PartialEq, Eq)]
     $vis enum $error_type_name {
-      InvalidValue,
+      InvalidValue($repr),
+      $($($additional_error_variant,)*)?
     }
 
     impl std::convert::TryFrom<$repr> for $enum_name {
@@ -24,9 +30,30 @@ macro_rules! backed_enum {
       fn try_from(value: $repr) -> Result<Self, Self::Error> {
         match value {
           $(x if x == $enum_name::$name as $repr => Ok($enum_name::$name), )*
-          _ => Err(Self::Error::InvalidValue),
+          x => Err(Self::Error::InvalidValue(x)),
         }
       }
+    }
+
+    impl From<$enum_name> for $repr {
+      fn from(value: $enum_name) -> Self {
+          value as $repr
+      }
+    }
+
+    impl From<&$enum_name> for $repr {
+      fn from(value: &$enum_name) -> Self {
+          *value as $repr
+      }
+    }
+
+    impl std::fmt::Display for $error_type_name {
+      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+          write!(f, "{:?}", self)
+      }
+    }
+
+    impl std::error::Error for $error_type_name {
     }
 
     #[cfg(test)]
@@ -44,6 +71,8 @@ macro_rules! backed_enum {
 
 /// Create a Vec<u8> by repeatedly extending with arguments.
 /// i.e. concat_vecs!(vec![0], vec![1]) == vec![0u8, 1u8]
+/// or even better, pre-allocate capacity for the elements:
+///   concat_vecs!(2; vec![0], vec![1]) == vec![0u8, 1u8]
 macro_rules! concat_vecs {
   ($($vec:expr),+) => {
     {

@@ -12,4 +12,8 @@ pub(crate) mod brandenburg {
             crate::chunk::header::Division::TicksPerQuarterNote(NonZeroU16::new(1024).unwrap()),
         )
     }
+
+    pub(crate) fn expected_track() -> Vec<crate::chunk::track::chunk::Chunk> {
+        vec![]
+    }
 }
