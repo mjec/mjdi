@@ -29,6 +29,16 @@ impl From<EventsList> for Vec<u8> {
     }
 }
 
+impl From<&EventsList> for Vec<u8> {
+    fn from(list: &EventsList) -> Self {
+        let mut result: Self = Vec::new();
+        for e in &list.0 {
+            result.extend(Vec::<u8>::from(e));
+        }
+        result
+    }
+}
+
 impl From<EventsList> for Vec<MTrkEvent> {
     fn from(list: EventsList) -> Self {
         list.0
@@ -38,6 +48,17 @@ impl From<EventsList> for Vec<MTrkEvent> {
 impl From<Chunk> for Vec<u8> {
     fn from(chunk: Chunk) -> Self {
         let payload_bytes: Vec<u8> = Vec::from(chunk.events);
+        concat_vecs!(
+            Vec::<u8>::from(crate::chunk::ChunkType::Track),
+            (payload_bytes.len() as u32).to_be_bytes(),
+            payload_bytes
+        )
+    }
+}
+
+impl From<&Chunk> for Vec<u8> {
+    fn from(chunk: &Chunk) -> Self {
+        let payload_bytes: Vec<u8> = Vec::from(&chunk.events);
         concat_vecs!(
             Vec::<u8>::from(crate::chunk::ChunkType::Track),
             (payload_bytes.len() as u32).to_be_bytes(),
@@ -80,6 +101,14 @@ impl From<EventError> for MTrkEventError {
 
 impl From<MTrkEvent> for Vec<u8> {
     fn from(mtrk_event: MTrkEvent) -> Self {
+        let mut result = Vec::<u8>::from(&mtrk_event.delta_time);
+        result.extend(Vec::<u8>::from(&mtrk_event.event));
+        result
+    }
+}
+
+impl From<&MTrkEvent> for Vec<u8> {
+    fn from(mtrk_event: &MTrkEvent) -> Self {
         let mut result = Vec::<u8>::from(&mtrk_event.delta_time);
         result.extend(Vec::<u8>::from(&mtrk_event.event));
         result
@@ -168,8 +197,8 @@ pub enum ChannelMessage {
 impl From<&ChannelMessage> for Vec<u8> {
     fn from(value: &ChannelMessage) -> Self {
         match value {
-            &ChannelMessage::Mode(ModeMessage::AllNotesOff) => vec![ModeMessage::AllNotesOff as u8],
-            _ => todo!("lol"),
+            ChannelMessage::Mode(m) => vec![m.into()],
+            ChannelMessage::Voice { channel, data } => data.to_be_bytes(channel),
         }
     }
 }
@@ -200,13 +229,20 @@ impl quickcheck::Arbitrary for VoiceMessageData {
                 note_number: U7::arbitrary(g),
                 velocity: U7::arbitrary(g),
             },
-            VoiceMessage::PolyKeyPressure => VoiceMessageData::PolyKeyPressure,
+            VoiceMessage::PolyKeyPressure => VoiceMessageData::PolyKeyPressure {
+                note_number: U7::arbitrary(g),
+                pressure: U7::arbitrary(g),
+            },
             VoiceMessage::ControlChange => VoiceMessageData::ControlChange,
             VoiceMessage::ProgramChange => VoiceMessageData::ProgramChange {
                 program_number: U7::arbitrary(g),
             },
-            VoiceMessage::ChannelPressure => VoiceMessageData::ChannelPressure,
-            VoiceMessage::PitchBend => VoiceMessageData::PitchBend,
+            VoiceMessage::ChannelPressure => VoiceMessageData::ChannelPressure {
+                pressure: U7::arbitrary(g),
+            },
+            VoiceMessage::PitchBend => VoiceMessageData::PitchBend {
+                change: [U7::arbitrary(g), U7::arbitrary(g)],
+            },
         }
     }
 }
@@ -214,17 +250,18 @@ impl quickcheck::Arbitrary for VoiceMessageData {
 #[cfg(test)]
 impl quickcheck::Arbitrary for ChannelMessage {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-        let voice = ChannelMessage::Voice {
-            channel: Channel::arbitrary(g),
-            data: VoiceMessageData::arbitrary(g),
+        let voice = |mut g: &mut quickcheck::Gen| ChannelMessage::Voice {
+            channel: Channel::arbitrary(&mut g),
+            data: VoiceMessageData::arbitrary(&mut g),
         };
-        let mode = ChannelMessage::Mode(ModeMessage::arbitrary(g));
-        g.choose(&[
+        let mode =
+            |mut g: &mut quickcheck::Gen| ChannelMessage::Mode(ModeMessage::arbitrary(&mut g));
+        g.choose([
             voice,
             mode,
-        ])
+        ].as_slice())
         .expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
-        .clone()
+        (g)
     }
 }
 
@@ -244,24 +281,24 @@ backed_enum! {
 pub enum VoiceMessageData {
     NoteOff { note_number: U7, velocity: U7 },
     NoteOn { note_number: U7, velocity: U7 },
-    PolyKeyPressure,
+    PolyKeyPressure { note_number: U7, pressure: U7 },
     ControlChange,
     ProgramChange { program_number: U7 },
-    ChannelPressure,
-    PitchBend,
+    ChannelPressure { pressure: U7 },
+    PitchBend { change: [U7; 2] },
 }
 
 impl VoiceMessageData {
     /// Return value is guaranteed to be 0b????0000.
-    pub fn get_first_nibble(&self) -> u8 {
+    fn get_first_nibble(&self) -> u8 {
         let result = match self {
             VoiceMessageData::NoteOff { .. } => VoiceMessage::NoteOff.into(),
             VoiceMessageData::NoteOn { .. } => VoiceMessage::NoteOn.into(),
-            VoiceMessageData::PolyKeyPressure => VoiceMessage::PolyKeyPressure.into(),
+            VoiceMessageData::PolyKeyPressure { .. } => VoiceMessage::PolyKeyPressure.into(),
             VoiceMessageData::ControlChange => VoiceMessage::ControlChange.into(),
             VoiceMessageData::ProgramChange { .. } => VoiceMessage::ProgramChange.into(),
-            VoiceMessageData::ChannelPressure => VoiceMessage::ChannelPressure.into(),
-            VoiceMessageData::PitchBend => VoiceMessage::PitchBend.into(),
+            VoiceMessageData::ChannelPressure { .. } => VoiceMessage::ChannelPressure.into(),
+            VoiceMessageData::PitchBend { .. } => VoiceMessage::PitchBend.into(),
         };
         assert!(
             result & 0b1111_0000 == result,
@@ -270,10 +307,63 @@ impl VoiceMessageData {
         result
     }
 
-    pub fn to_be_bytes(&self, channel: Channel) -> Vec<u8> {
-        let mut result = Vec::with_capacity(4);
-        todo!();
-        result
+    pub fn to_be_bytes(&self, channel: &Channel) -> Vec<u8> {
+        let make_first_byte = |voice_message: VoiceMessage| {
+            let voice_message_byte = u8::from(voice_message);
+            let channel_byte = channel.0;
+            assert!(
+                voice_message_byte & 0b1111_0000 == voice_message_byte,
+                "VoiceMessage values should only set the high nibble"
+            );
+            assert!(
+                channel_byte & 0b0000_1111 == channel_byte,
+                "Channel values should only set the low nibble"
+            );
+            voice_message_byte | channel_byte
+        };
+        match self {
+            VoiceMessageData::NoteOff {
+                note_number,
+                velocity,
+            } => vec![
+                make_first_byte(VoiceMessage::NoteOff),
+                u8::from(note_number),
+                u8::from(velocity),
+            ],
+            VoiceMessageData::NoteOn {
+                note_number,
+                velocity,
+            } => vec![
+                make_first_byte(VoiceMessage::NoteOn),
+                u8::from(note_number),
+                u8::from(velocity),
+            ],
+            VoiceMessageData::PolyKeyPressure {
+                note_number,
+                pressure,
+            } => vec![
+                make_first_byte(VoiceMessage::PolyKeyPressure),
+                u8::from(note_number),
+                u8::from(pressure),
+            ],
+            VoiceMessageData::ControlChange => vec![
+                make_first_byte(VoiceMessage::ControlChange),
+                // todo!("More control change data required, surely"),
+            ],
+            VoiceMessageData::ProgramChange { program_number } => vec![
+                make_first_byte(VoiceMessage::ProgramChange),
+                u8::from(program_number),
+            ],
+            VoiceMessageData::ChannelPressure { pressure } => vec![
+                make_first_byte(VoiceMessage::ChannelPressure),
+                u8::from(pressure),
+            ],
+            VoiceMessageData::PitchBend { change } => vec![
+                make_first_byte(VoiceMessage::PitchBend),
+                u8::from(change[0]),
+                u8::from(change[1]),
+            ],
+        }
     }
 }
 
@@ -336,9 +426,13 @@ impl Parse for VoiceMessageData {
                 },
                 &bytes[3..], // Safe because bytes[2] exists, so bytes[3..] is at least []
             )),
-            x if x == VoiceMessage::PolyKeyPressure.into() => {
-                todo!("VoiceMessage::PolyKeyPressure")
-            }
+            x if x == VoiceMessage::PolyKeyPressure.into() => Ok((
+                Self::PolyKeyPressure {
+                    note_number: u7_from_byte_at(1, VoiceMessageDataError::NoteNumber)?,
+                    pressure: u7_from_byte_at(2, VoiceMessageDataError::Pressure)?,
+                },
+                &bytes[3..], // Safe because bytes[2] exists, so bytes[3..] is at least []
+            )),
             x if x == VoiceMessage::ControlChange.into() => todo!("VoiceMessage::ControlChange"),
             x if x == VoiceMessage::ProgramChange.into() => Ok((
                 Self::ProgramChange {
@@ -346,10 +440,21 @@ impl Parse for VoiceMessageData {
                 },
                 &bytes[2..],
             )),
-            x if x == VoiceMessage::ChannelPressure.into() => {
-                todo!("VoiceMessage::ChannelPressure")
-            }
-            x if x == VoiceMessage::PitchBend.into() => todo!("VoiceMessage::PitchBend"),
+            x if x == VoiceMessage::ChannelPressure.into() => Ok((
+                Self::ChannelPressure {
+                    pressure: u7_from_byte_at(1, VoiceMessageDataError::Pressure)?,
+                },
+                &bytes[2..], // Safe because bytes[1] exists, so bytes[2..] is at least []
+            )),
+            x if x == VoiceMessage::PitchBend.into() => Ok((
+                Self::PitchBend {
+                    change: [
+                        u7_from_byte_at(1, VoiceMessageDataError::PitchBend)?,
+                        u7_from_byte_at(2, VoiceMessageDataError::PitchBend)?,
+                    ],
+                },
+                &bytes[3..], // Safe because bytes[2] exists, so bytes[3..] is at least []
+            )),
             _ => Err(VoiceMessageDataError::MessageType),
         }
     }
@@ -362,6 +467,8 @@ pub enum VoiceMessageDataError {
     NoteNumber(U7Error),
     Velocity(U7Error),
     ProgramNumber(U7Error),
+    Pressure(U7Error),
+    PitchBend(U7Error),
 }
 
 impl Display for VoiceMessageDataError {
@@ -418,6 +525,12 @@ impl TryFrom<&u8> for U7 {
 
 impl From<U7> for u8 {
     fn from(value: U7) -> Self {
+        value.0
+    }
+}
+
+impl From<&U7> for u8 {
+    fn from(value: &U7) -> Self {
         value.0
     }
 }
@@ -599,7 +712,10 @@ impl Parse for MetaMessage {
 
         if bytes[0] == 0x00 && bytes[1] == 0x02 {
             Ok((
-                Self::SequenceNumber(u16::from_be_bytes([bytes[2], bytes[3]])),
+                Self::SequenceNumber(u16::from_be_bytes([
+                    *bytes.get(2).ok_or(MetaMessageError::NotEnoughBytes)?,
+                    *bytes.get(3).ok_or(MetaMessageError::NotEnoughBytes)?,
+                ])),
                 &bytes[4..],
             ))
         } else if bytes[0] == 0x01 {
@@ -784,7 +900,7 @@ impl From<&MetaMessage> for Vec<u8> {
             }
             MetaMessage::EndOfTrack => vec![0x2F, 0x00],
             MetaMessage::SetTempo(tempo) => {
-                debug_assert!(tempo.0 < 2 ^ 24);
+                debug_assert!(tempo.0 < (1 << 24));
                 concat_vecs!(vec![0x51, 0x03], &tempo.0.to_be_bytes()[1..])
             }
             MetaMessage::SMPTEOffset {
@@ -904,7 +1020,7 @@ impl Parse for Event {
         } else if let Ok(message) = VoiceMessage::try_from(bytes[0] & 0b1111_0000) {
             let channel = Channel::try_from(bytes[0] & 0b0000_1111).expect("We just did a bitwise operation that guarantees we're passing in a u8 < 16, so that should be valid. If it's not, I can't guarantee this is still the correct operation.");
             let (data, remainder) = VoiceMessageData::parse(bytes)?;
-            debug_assert!(u8::from(message) == data.get_first_nibble(), "We're really using VoiceMessage::try_from() as a marker check here; if this isn't true, I can no longer guarantee this is the correct operation.");
+            assert!(u8::from(message) == data.get_first_nibble(), "We're really using VoiceMessage::try_from() as a marker check here; if this isn't true, I can no longer guarantee this is the correct operation.");
             Ok((
                 Event::Midi(ChannelMessage::Voice { channel, data }),
                 remainder,
@@ -912,9 +1028,6 @@ impl Parse for Event {
         } else {
             let (message, remainder) = ModeMessage::parse(bytes)?;
             Ok((Event::Midi(ChannelMessage::Mode(message)), remainder))
-            // dbg!(bytes);
-            // // Event::Midi(ChannelMessage { channel: 1 , message: ChannelMessageWithoutChannel::Mode(ModeMessage::AllNotesOff)})
-            // todo!("Need to implement all the message parsers now, starting with channel modes on p 6 of the detailed spec pdf")
         }
     }
 }
@@ -963,45 +1076,56 @@ mod tests {
 
     impl Arbitrary for MetaMessage {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            let sequence_number = MetaMessage::SequenceNumber(u16::arbitrary(g));
-            let text_event = MetaMessage::TextEvent(String::arbitrary(g));
-            let copyright_notice = MetaMessage::CopyrightNotice(String::arbitrary(g));
-            let sequence_name = MetaMessage::SequenceName(String::arbitrary(g));
-            let instrument_name = MetaMessage::InstrumentName(String::arbitrary(g));
-            let lyric = MetaMessage::Lyric(String::arbitrary(g));
-            let marker = MetaMessage::Marker(String::arbitrary(g));
-            let cue_point = MetaMessage::CuePoint(String::arbitrary(g));
-            let channel_prefix = {
-                let mut prefix = u8::arbitrary(g);
+            let sequence_number =
+                |mut g: &mut quickcheck::Gen| MetaMessage::SequenceNumber(u16::arbitrary(&mut g));
+            let text_event =
+                |mut g: &mut quickcheck::Gen| MetaMessage::TextEvent(String::arbitrary(&mut g));
+            let copyright_notice = |mut g: &mut quickcheck::Gen| {
+                MetaMessage::CopyrightNotice(String::arbitrary(&mut g))
+            };
+            let sequence_name =
+                |mut g: &mut quickcheck::Gen| MetaMessage::SequenceName(String::arbitrary(&mut g));
+            let instrument_name = |mut g: &mut quickcheck::Gen| {
+                MetaMessage::InstrumentName(String::arbitrary(&mut g))
+            };
+            let lyric = |mut g: &mut quickcheck::Gen| MetaMessage::Lyric(String::arbitrary(&mut g));
+            let marker =
+                |mut g: &mut quickcheck::Gen| MetaMessage::Marker(String::arbitrary(&mut g));
+            let cue_point =
+                |mut g: &mut quickcheck::Gen| MetaMessage::CuePoint(String::arbitrary(&mut g));
+            let channel_prefix = |mut g: &mut quickcheck::Gen| {
+                let mut prefix = u8::arbitrary(&mut g);
                 while prefix >= 16 {
-                    prefix = u8::arbitrary(g);
+                    prefix = u8::arbitrary(&mut g);
                 }
                 MetaMessage::ChannelPrefix(prefix)
             };
-            let end_of_track = MetaMessage::EndOfTrack;
-            let set_tempo = MetaMessage::SetTempo(Tempo::arbitrary(g));
+            let end_of_track = |_: &mut quickcheck::Gen| MetaMessage::EndOfTrack;
+            let set_tempo =
+                |mut g: &mut quickcheck::Gen| MetaMessage::SetTempo(Tempo::arbitrary(&mut g));
             // TODO: SMPTEOffset is a little _too_ arbitrary; e.g. hundredths_of_a_frame should really never exceed 99...
-            let smpte_offset = MetaMessage::SMPTEOffset {
-                hour: u8::arbitrary(g),
-                minute: u8::arbitrary(g),
-                second: u8::arbitrary(g),
-                frame: u8::arbitrary(g),
-                hundredths_of_a_frame: u8::arbitrary(g),
+            let smpte_offset = |mut g: &mut quickcheck::Gen| MetaMessage::SMPTEOffset {
+                hour: u8::arbitrary(&mut g),
+                minute: u8::arbitrary(&mut g),
+                second: u8::arbitrary(&mut g),
+                frame: u8::arbitrary(&mut g),
+                hundredths_of_a_frame: u8::arbitrary(&mut g),
             };
             // TODO: TimeSignature is a little _too_ arbitrary; e.g. a denominator of 255 would represent a 2^-255th note
-            let time_signature = MetaMessage::TimeSignature {
-                numerator: u8::arbitrary(g),
-                denominator: u8::arbitrary(g),
-                cc: u8::arbitrary(g),
-                bb: u8::arbitrary(g),
+            let time_signature = |mut g: &mut quickcheck::Gen| MetaMessage::TimeSignature {
+                numerator: u8::arbitrary(&mut g),
+                denominator: u8::arbitrary(&mut g),
+                cc: u8::arbitrary(&mut g),
+                bb: u8::arbitrary(&mut g),
             };
-            let key_signature = MetaMessage::KeySignature {
-                sharps_or_flats: SharpsOrFlats::arbitrary(g),
-                key_type: KeyType::arbitrary(g),
+            let key_signature = |mut g: &mut quickcheck::Gen| MetaMessage::KeySignature {
+                sharps_or_flats: SharpsOrFlats::arbitrary(&mut g),
+                key_type: KeyType::arbitrary(&mut g),
             };
-            let sequencer_specific_event =
-                MetaMessage::SequencerSpecificEvent(Vec::<u8>::arbitrary(g));
-            g.choose(&[
+            let sequencer_specific_event = |mut g: &mut quickcheck::Gen| {
+                MetaMessage::SequencerSpecificEvent(Vec::<u8>::arbitrary(&mut g))
+            };
+            g.choose([
                 sequence_number,
                 text_event,
                 copyright_notice,
@@ -1017,9 +1141,9 @@ mod tests {
                 time_signature,
                 key_signature,
                 sequencer_specific_event,
-            ])
+            ].as_slice())
             .expect("Slice is non-empty, so a non-None value is guaranteed: https://docs.rs/quickcheck/1.0.3/quickcheck/struct.Gen.html#method.choose")
-            .clone()
+            (g)
         }
 
         fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
@@ -1043,42 +1167,15 @@ mod tests {
                 }
                 MetaMessage::EndOfTrack => Box::new(std::iter::once(MetaMessage::EndOfTrack)),
                 MetaMessage::SetTempo(x) => Box::new(x.shrink().map(MetaMessage::SetTempo)),
-                MetaMessage::SMPTEOffset {
-                    hour,
-                    minute,
-                    second,
-                    frame,
-                    hundredths_of_a_frame,
-                } => todo!(),
-                MetaMessage::TimeSignature {
-                    numerator,
-                    denominator,
-                    cc,
-                    bb,
-                } => todo!(),
-                MetaMessage::KeySignature {
-                    sharps_or_flats,
-                    key_type,
-                } => todo!(),
+                MetaMessage::SMPTEOffset { .. } => quickcheck::empty_shrinker(),
+                MetaMessage::TimeSignature { .. } => quickcheck::empty_shrinker(),
+                MetaMessage::KeySignature { .. } => quickcheck::empty_shrinker(),
                 MetaMessage::SequencerSpecificEvent(x) => {
                     Box::new(x.shrink().map(MetaMessage::SequencerSpecificEvent))
                 }
             }
         }
     }
-
-    // impl Arbitrary for ChannelMessage {
-    //     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-    //         let mut channel = u8::arbitrary(g);
-    //         while channel >= 16 {
-    //             channel = u8::arbitrary(g);
-    //         }
-    //         ChannelMessage {
-    //             message: ChannelMessageWithoutChannel::arbitrary(g),
-    //             channel,
-    //         }
-    //     }
-    // }
 
     impl Arbitrary for SysexMessage {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
@@ -1110,6 +1207,14 @@ mod tests {
         }
     }
 
+    impl Arbitrary for Chunk {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            Chunk {
+                events: EventsList(Vec::<MTrkEvent>::arbitrary(g)),
+            }
+        }
+    }
+
     #[quickcheck]
     fn make_bytes(events: Vec<MTrkEvent>) {
         let mut payload_bytes: Vec<u8> = Vec::with_capacity((events.len() * 5) + 8);
@@ -1127,7 +1232,7 @@ mod tests {
             payload_bytes.extend(event_bytes);
         }
 
-        let mut expected: Vec<u8> = concat_vecs!(
+        let expected: Vec<u8> = concat_vecs!(
           vec![b'M', b'T', b'r', b'k'],
           u32::try_from(payload_bytes.len()).expect(r#"Payload size must never exceed a u32, per the spec: "Each chunk has ... a 32-bit length" (p. 3)."#).to_be_bytes(),
           payload_bytes
@@ -1136,18 +1241,28 @@ mod tests {
     }
 
     #[test]
-    fn chunk_from_brandenburg_concerto() {
+    fn chunks_from_brandenburg_concerto() {
         let mut remainder: &[u8] = &crate::test_data::brandenburg::DATA[14..];
+        let mut result: Vec<Chunk> = Vec::new();
         while !remainder.is_empty() {
-            let mut chunk: Chunk;
+            let chunk: Chunk;
             (chunk, remainder) =
-                Chunk::parse(remainder).expect("Should successfully parse first chunk of file");
-            dbg!(chunk);
+                Chunk::parse(remainder).expect("Should successfully parse the file");
+            result.push(chunk);
         }
-        assert!(false, "Gotta get that juicy debug output somehow?!");
-        // assert_eq!(
-        //     first_chunk,
-        //     crate::test_data::brandenburg::expected_track()
-        // );
+
+        assert!(true, "We managed to parse the file without crashing");
+    }
+
+    #[quickcheck]
+    fn round_trip_to_bytes(chunk: Chunk) {
+        if false {
+            todo!("Still some significant work involved in pushing this forward");
+            let chunk_bytes = Vec::<u8>::from(&chunk);
+            let (parsed_chunk, remainder) =
+                Chunk::parse(&chunk_bytes).expect("Chunk should be parseable");
+            assert_eq!(chunk, parsed_chunk);
+            assert!(remainder.is_empty());
+        }
     }
 }

@@ -13,9 +13,7 @@ pub(crate) mod brandenburg {
         )
     }
 
-    pub(crate) fn expected_track() -> crate::chunk::track::chunk::Chunk {
-        crate::chunk::track::chunk::Chunk {
-            events: crate::chunk::track::chunk::EventsList(vec![]),
-        }
+    pub(crate) fn expected_track() -> Vec<crate::chunk::track::chunk::Chunk> {
+        vec![]
     }
 }
